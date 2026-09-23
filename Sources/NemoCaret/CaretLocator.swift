@@ -16,6 +16,7 @@ public enum CaretLocator {
     public static func locate(primaryHeight: CGFloat, pid: pid_t?) -> Hit? {
         guard var focused = focusedElement(pid: pid) else { return nil }
         if let (r, how) = caretBounds(focused) {
+            learnInset(of: focused, pid: pid)
             return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
         }
         // focus sits on a container (a browser's web view with its tree still off): wake it and look again
@@ -33,11 +34,14 @@ public enum CaretLocator {
         }
         if let pos = point(focused, kAXPositionAttribute), let size = self.size(focused, kAXSizeAttribute),
            size.width > 0, size.height > 0, size.height < 60 {
-            // a single-line field that gives no range bounds (usually empty): the caret is at its left edge.
+            // a single-line field that gives no range bounds (usually empty): the caret sits at the text
+            // inset from its left edge, which is remembered per field from an earlier time it had text.
             // Bigger elements are skipped: a glow in the corner of a page or document is not on the caret.
             let f = flip(CGRect(origin: pos, size: size), primaryHeight)
             let caretH = min(18, f.height - 6)
-            return Hit(rect: CGRect(x: f.minX + 12, y: f.midY - caretH / 2, width: 2, height: caretH), precise: false, method: "field frame")
+            let inset = fieldKey(focused, pid: pid).flatMap { learnedInsets[$0] } ?? 12
+            return Hit(rect: CGRect(x: f.minX + inset, y: f.midY - caretH / 2, width: 2, height: caretH), precise: false,
+                       method: "field frame, inset \(Int(inset))")
         }
         return nil
     }
@@ -67,6 +71,37 @@ public enum CaretLocator {
         }
         if let sz = size(el, kAXSizeAttribute) { why += ", size \(Int(sz.width))x\(Int(sz.height))" }
         return (nil, why)
+    }
+
+    // MARK: - remembered text insets
+
+    private static let insetsKey = "caretInsets"
+    private static var learnedInsets: [String: CGFloat] = {
+        (UserDefaults.standard.dictionary(forKey: insetsKey) as? [String: Double])?.mapValues { CGFloat($0) } ?? [:]
+    }()
+    private static var insetChecked = Set<String>()
+
+    /// Fields are identified by app and by role plus the stable part of their DOM class list.
+    private static func fieldKey(_ el: AXUIElement, pid: pid_t?) -> String? {
+        guard let pid, let bundle = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier else { return nil }
+        var part = string(el, kAXRoleAttribute) ?? "?"
+        if let cls = raw(el, "AXDOMClassList") as? [String] {
+            let stable = cls.filter { !$0.lowercased().contains("focus") }.prefix(2)
+            if !stable.isEmpty { part += "." + stable.joined(separator: ".") }
+        }
+        return bundle + "|" + part
+    }
+
+    /// While the field has text, measure where its first character starts relative to the field's
+    /// left edge, and remember it for the next time the field is empty. Once per field per launch.
+    private static func learnInset(of el: AXUIElement, pid: pid_t?) {
+        guard let key = fieldKey(el, pid: pid), !insetChecked.contains(key) else { return }
+        insetChecked.insert(key)
+        guard let first = bounds(el, CFRange(location: 0, length: 1)), let pos = point(el, kAXPositionAttribute) else { return }
+        let inset = first.minX - pos.x
+        guard inset >= 0, inset <= 200 else { return }
+        learnedInsets[key] = inset
+        UserDefaults.standard.set(learnedInsets.mapValues { Double($0) }, forKey: insetsKey)
     }
 
     // MARK: - lookup strategies

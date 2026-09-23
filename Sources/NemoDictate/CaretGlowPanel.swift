@@ -35,8 +35,6 @@ final class CaretGlowPanel {
     private var observer: AXObserver?
     private var observedPID: pid_t = 0
     private var releaseTask: DispatchWorkItem?
-    private var provisional: NSPoint?             // a rough position (edge of an empty field) held back in case the caret shows up
-    private var provisionalTask: DispatchWorkItem?
     private var moveGeneration = 0
     private var demoTicks = 0
 
@@ -100,9 +98,6 @@ final class CaretGlowPanel {
         timer?.invalidate()
         timer = nil
         stopMotion()
-        provisionalTask?.cancel()
-        provisionalTask = nil
-        provisional = nil
         unobserve()
         fade(to: 0, duration: 0.3, thenOrderOut: true)
         // give browsers their normal behaviour back once dictation has been quiet for a while
@@ -185,22 +180,9 @@ final class CaretGlowPanel {
         let s = CaretGlowPanel.size
         let origin = NSPoint(x: hit.rect.midX - s / 2, y: hit.rect.midY - s / 2)
         if !placed {
-            if hit.precise {
-                appear(at: origin)
-            } else {
-                // only the edge of an empty field is known: the caret itself usually reports a moment
-                // later (once the first word lands), so wait for it rather than appear and then jump
-                provisional = origin
-                if provisionalTask == nil {
-                    let task = DispatchWorkItem { [weak self] in
-                        guard let self, self.shown, !self.placed, let p = self.provisional else { return }
-                        self.provisionalTask = nil
-                        self.appear(at: p)
-                    }
-                    provisionalTask = task
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7, execute: task)
-                }
-            }
+            // show up at once, on the best position known; if the caret itself reports a little later
+            // (an empty field only gives its edge and text inset), the glow glides over to it
+            appear(at: origin)
             return
         }
         let dist = hypot(target.x - origin.x, target.y - origin.y)
@@ -218,9 +200,6 @@ final class CaretGlowPanel {
     /// First appearance in a session, or after the caret was lost: settle the window and let the
     /// view play its entrance.
     private func appear(at origin: NSPoint) {
-        provisionalTask?.cancel()
-        provisionalTask = nil
-        provisional = nil
         placed = true
         current = origin
         target = origin
@@ -284,9 +263,6 @@ final class CaretGlowPanel {
     /// No caret this tick (focus moved to something without text, or the app does not tell): go quiet.
     private func lost() {
         placed = false
-        provisional = nil
-        provisionalTask?.cancel()
-        provisionalTask = nil
         stopMotion()
         if panel.alphaValue > 0 { fade(to: 0, duration: 0.25, thenOrderOut: false) }
     }
