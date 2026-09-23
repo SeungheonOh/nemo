@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = DictationModel()
     private var statusBar: StatusBarController?
     private var panel: IndicatorPanel?
+    private var caret: CaretGlowPanel?
     private var hotKey: HotKey?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -27,7 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let panel = IndicatorPanel(model: model)
         self.panel = panel
         statusBar = StatusBarController(model: model)
+        let caret = CaretGlowPanel(model: model)
+        self.caret = caret
         model.$pillVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in panel.setVisible(visible) }.store(in: &cancellables)
+        model.$caretEffectVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in caret.setVisible(visible) }.store(in: &cancellables)
+        model.$insertPulse.dropFirst().receive(on: DispatchQueue.main).sink { _ in caret.nudge() }.store(in: &cancellables)
         if ProcessInfo.processInfo.environment["NEMO_DEMO"] != nil { model.demoStream(); return }
         if model.wakeMode { model.start() }
         hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)) { [weak self] in self?.model.toggle() }

@@ -17,12 +17,14 @@ let package = Package(
     targets: [
         .systemLibrary(name: "CNemoASR", path: "Sources/CNemoASR"),
         .target(name: "NemoAudio", path: "Sources/NemoAudio", linkerSettings: [.linkedFramework("CoreAudio")]),
+        .target(name: "NemoCaret", path: "Sources/NemoCaret", linkerSettings: [.linkedFramework("AppKit"), .linkedFramework("ApplicationServices")]),
         .executableTarget(
             name: "NemoDictate",
-            dependencies: ["CNemoASR", "NemoAudio"],
+            dependencies: ["CNemoASR", "NemoAudio", "NemoCaret"],
             path: "Sources/NemoDictate",
             linkerSettings: link + [.linkedFramework("AppKit"), .linkedFramework("SwiftUI"), .linkedFramework("AVFoundation"), .linkedFramework("Carbon")]
         ),
+        .executableTarget(name: "nemo-caret", dependencies: ["NemoCaret"], path: "Sources/nemo-caret"),
         .executableTarget(
             name: "nemo-feed",
             dependencies: ["CNemoASR", "NemoAudio"],

@@ -23,12 +23,15 @@ final class DictationModel: ObservableObject {
     @Published var statusLine = ""
     @Published var lastTranscript = ""
     @Published var pillVisible = false
+    @Published var caretEffectVisible = false   // typing mode: the glow that follows the insertion point
+    @Published var insertPulse = 0              // bumps every time a chunk of text is typed
+    private let demo = ProcessInfo.processInfo.environment["NEMO_DEMO"]   // "pill" / "caret": drive the UI without a microphone
 
     // settings (persisted)
     @Published var language = UserDefaults.standard.string(forKey: "language") ?? "auto" { didSet { UserDefaults.standard.set(language, forKey: "language") } }
     @Published var latencyMs = UserDefaults.standard.object(forKey: "latencyMs") as? Int ?? 560 { didSet { UserDefaults.standard.set(latencyMs, forKey: "latencyMs") } }
     @Published var micUID: String? = UserDefaults.standard.string(forKey: "micUID") { didSet { UserDefaults.standard.set(micUID, forKey: "micUID") } }
-    @Published var outputMode = OutputMode(rawValue: UserDefaults.standard.string(forKey: "outputMode") ?? "") ?? .clipboard { didSet { UserDefaults.standard.set(outputMode.rawValue, forKey: "outputMode"); pillVisible = pillWanted } }
+    @Published var outputMode = OutputMode(rawValue: UserDefaults.standard.string(forKey: "outputMode") ?? "") ?? .clipboard { didSet { UserDefaults.standard.set(outputMode.rawValue, forKey: "outputMode"); updateOverlays() } }
     @Published var wakeWord = UserDefaults.standard.string(forKey: "wakeWord") ?? "hey nemo" { didSet { UserDefaults.standard.set(wakeWord, forKey: "wakeWord"); detector = WakeWordDetector(phrase: wakeWord) } }
     @Published var wakeMode = UserDefaults.standard.bool(forKey: "wakeMode") { didSet { UserDefaults.standard.set(wakeMode, forKey: "wakeMode") } }
     @Published var silenceStop = UserDefaults.standard.object(forKey: "silenceStop") as? Double ?? 2.5 { didSet { UserDefaults.standard.set(silenceStop, forKey: "silenceStop") } }
@@ -39,6 +42,7 @@ final class DictationModel: ObservableObject {
     private var hideTask: DispatchWorkItem?
     private var silenceTask: DispatchWorkItem?
     private var typedCount = 0          // characters of `transcript` already typed into the focused app
+    private var noticeUntil = Date.distantPast   // while in the future the pill stays up to show `statusLine`, whatever the mode
 
     static let languages: [(String, String)] = [
         ("auto", "Detect language"), ("en-US", "English"), ("ko-KR", "Korean"), ("ja-JP", "Japanese"),
@@ -77,8 +81,7 @@ final class DictationModel: ObservableObject {
     func setOutputMode(_ mode: OutputMode) {
         if mode == .type, !TextInserter.isTrusted {
             TextInserter.requestTrust()
-            statusLine = "Grant Accessibility access to NemoDictate, then pick this again"
-            flash()
+            notice("Grant Accessibility access to NemoDictate, then pick this again", seconds: 5)
             return
         }
         outputMode = mode
@@ -100,6 +103,7 @@ final class DictationModel: ObservableObject {
         detector.reset()
         statusLine = "Loading model…"
         set(.loading)
+        warnIfUntrusted()
         let t = Transcriber()
         transcriber = t
         t.onReady = { [weak self] gpu, mic in
@@ -148,6 +152,7 @@ final class DictationModel: ObservableObject {
         let target = outputMode == .type ? " · typing into \(TextInserter.frontmostAppName)" : ""
         statusLine = "Transcribing\(target) · stops after \(String(format: "%.1f", silenceStop)) s of silence"
         set(.listening)
+        warnIfUntrusted()
         deliverLiveText()
         armSilenceTimer()
     }
@@ -200,6 +205,7 @@ final class DictationModel: ObservableObject {
         if !pending.isEmpty {
             TextInserter.type(pending)
             typedCount = transcript.count
+            insertPulse += 1
         }
     }
 
@@ -227,9 +233,21 @@ final class DictationModel: ObservableObject {
     // MARK: - Demo (NEMO_DEMO=1: drives the pill without a microphone, for UI work)
 
     func demoStream() {
-        outputMode = .clipboard
         statusLine = "Listening · demo · 560 ms"
         set(.listening)
+        if demo == "caret" {
+            // fake typing bursts and a finish, so the caret effect can be looked at without a text field
+            Timer.scheduledTimer(withTimeInterval: 0.7, repeats: true) { [weak self] t in
+                guard let self, self.state == .listening else { t.invalidate(); return }
+                self.insertPulse += 1
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 14) { [weak self] in
+                guard let self else { return }
+                self.statusLine = "Inserted"
+                self.set(.done)
+                self.scheduleHide(after: 1.6)
+            }
+        }
         let words = """
         The quick brown fox jumps over the lazy dog while the indicator keeps growing line by line, \
         so that a longer dictation stays readable instead of being cut off after two lines. Once it reaches \
@@ -271,24 +289,55 @@ final class DictationModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: task)
     }
 
-    private func flash() {
+    /// Show `text` on the pill for a while even in typing mode (where the pill is otherwise hidden).
+    private func notice(_ text: String, seconds: Double) {
+        statusLine = text
+        noticeUntil = Date().addingTimeInterval(seconds)
         pillVisible = true
-        scheduleHide(after: 4)
+        scheduleHide(after: seconds)
+    }
+
+    /// Typing mode without Accessibility access would silently do nothing; say so and ask again.
+    private func warnIfUntrusted() {
+        guard outputMode == .type, demo == nil, !TextInserter.isTrusted else { return }
+        TextInserter.requestTrust()
+        notice("Accessibility access is off for this build of NemoDictate · re-add it under Privacy & Security → Accessibility", seconds: 8)
     }
 
     /// When typing straight into the focused field the text itself is the feedback, so the pill stays
-    /// hidden; only failures are still shown.
-    private var pillWanted: Bool {
+    /// hidden and the caret glow is shown instead; failures still use the pill.
+    private var typingMode: Bool { demo == "caret" || (demo != "pill" && outputMode == .type) }
+
+    private func updateOverlays() {
         switch state {
-        case .idle: return false
-        case .failed: return true
-        default: return outputMode != .type
+        case .idle:
+            pillVisible = false
+            caretEffectVisible = false
+        case .failed:
+            pillVisible = true
+            caretEffectVisible = false
+        case .loading, .listening, .finishing:
+            pillVisible = !typingMode
+            caretEffectVisible = typingMode
+        case .standby:
+            pillVisible = !typingMode
+            caretEffectVisible = false
+        case .done:
+            pillVisible = !typingMode
+            // the caret glow lingers for a moment, then goes
+            if caretEffectVisible {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                    guard let self, self.state != .listening, self.state != .loading else { return }
+                    self.caretEffectVisible = false
+                }
+            }
         }
     }
 
     private func set(_ s: DictationState) {
         state = s
-        pillVisible = pillWanted
+        updateOverlays()
+        if Date() < noticeUntil { pillVisible = true }
         onStateChange?(s)
     }
 }
