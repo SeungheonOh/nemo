@@ -93,6 +93,10 @@ final class DictationModel: ObservableObject {
     // MARK: - Session
 
     func start() {
+        if !wakeMode, targetIsSelf, demo == nil {
+            statusLine = "Click into another app first"
+            return
+        }
         settleTask?.cancel()
         transcript = ""
         typedCount = 0
@@ -167,7 +171,18 @@ final class DictationModel: ObservableObject {
         }
     }
 
+    /// Dictation aimed at our own windows (the Settings window's wake-word field, say) would rewrite
+    /// the settings themselves; such a segment is not started.
+    private var targetIsSelf: Bool {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+    }
+
     private func beginTranscribing(initial: String) {
+        if targetIsSelf, demo == nil {
+            DebugLog.write("segment refused · NemoDictate itself is in front")
+            statusLine = "Click into another app first"
+            return
+        }
         settleTask?.cancel()
         wakePendingTask?.cancel()
         standbyRefreshTask?.cancel()

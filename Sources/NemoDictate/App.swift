@@ -31,6 +31,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         model.$caretEffectVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in caret.setVisible(visible) }.store(in: &cancellables)
         model.$insertPulse.dropFirst().receive(on: DispatchQueue.main).sink { _ in caret.nudge() }.store(in: &cancellables)
         if ProcessInfo.processInfo.environment["NEMO_DEMO"] == "caret" { model.demoCaret(); return }
+        if ProcessInfo.processInfo.environment["NEMO_DEMO_MENU"] != nil {
+            // UI work: pop the status menu up at a fixed spot
+            model.statusLine = "Standing by for “spark” · MacBook Pro Microphone"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                NSApp.activate(ignoringOtherApps: true)
+                self?.statusBar?.popUpMenu(at: NSPoint(x: 400, y: 1200))
+            }
+            return
+        }
+        if let tab = ProcessInfo.processInfo.environment["NEMO_DEMO_SETTINGS"] {
+            // UI work: open Settings at a fixed spot (top-left 200,200 in Quartz coordinates) on the given tab
+            SettingsWindow.shared.show(model: model, tab: Int(tab) ?? 0, at: NSPoint(x: 200, y: 160))
+            return
+        }
         if model.wakeMode { model.start() }
         hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)) { [weak self] in self?.model.toggle() }
     }

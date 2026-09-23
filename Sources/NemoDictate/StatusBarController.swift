@@ -36,23 +36,40 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         toggle.keyEquivalentModifierMask = [.option]
         toggle.target = self
         toggle.tag = 1
+        toggle.image = symbol("mic")
         menu.addItem(toggle)
         let wake = NSMenuItem(title: "Wake-Word Mode", action: #selector(toggleWake(_:)), keyEquivalent: "")
         wake.target = self
         wake.tag = 4
+        wake.image = symbol("ear")
         menu.addItem(wake)
         let copy = NSMenuItem(title: "Copy Last Transcript", action: #selector(copyLast(_:)), keyEquivalent: "")
         copy.target = self
         copy.tag = 2
+        copy.image = symbol("doc.on.clipboard")
         menu.addItem(copy)
         menu.addItem(.separator())
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings(_:)), keyEquivalent: ",")
         settings.target = self
+        settings.image = symbol("gearshape")
         menu.addItem(settings)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit NemoDictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
         return menu
+    }
+
+    /// UI work: show the menu somewhere on screen without clicking the status item.
+    func popUpMenu(at point: NSPoint) {
+        guard let menu = item.menu else { return }
+        menuNeedsUpdate(menu)
+        menu.popUp(positioning: nil, at: point, in: nil)
+    }
+
+    private func symbol(_ name: String) -> NSImage? {
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)
+        image?.isTemplate = true
+        return image
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -64,12 +81,22 @@ final class StatusBarController: NSObject, NSMenuDelegate {
             menu.insertItem(status, at: 0)
             menu.insertItem(.separator(), at: 1)
         }
-        menu.item(withTag: 9)?.title = model.statusLine.isEmpty ? "Idle" : model.statusLine
+        if let status = menu.item(withTag: 9) {
+            // state word in the primary colour, the details after it in secondary
+            let line = model.statusLine.isEmpty ? "Idle" : model.statusLine
+            let parts = line.components(separatedBy: " · ")
+            let text = NSMutableAttributedString(string: parts[0], attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium), .foregroundColor: NSColor.labelColor])
+            if parts.count > 1 {
+                text.append(NSAttributedString(string: "\n" + parts.dropFirst().joined(separator: " · "),
+                                               attributes: [.font: NSFont.systemFont(ofSize: 11), .foregroundColor: NSColor.secondaryLabelColor]))
+            }
+            status.attributedTitle = text
+        }
         if let toggle = menu.item(withTag: 1) {
             switch model.state {
-            case .listening: toggle.title = "Stop Dictating"
-            case .standby: toggle.title = "Dictate Now (skip the wake word)"
-            default: toggle.title = "Start Dictating"
+            case .listening: toggle.title = "Stop Dictating"; toggle.image = symbol("stop.circle")
+            case .standby: toggle.title = "Dictate Now"; toggle.image = symbol("mic")
+            default: toggle.title = "Start Dictating"; toggle.image = symbol("mic")
             }
             toggle.isEnabled = !(model.state == .loading || model.state == .finishing)
         }
