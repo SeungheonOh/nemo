@@ -41,6 +41,7 @@ final class DictationModel: ObservableObject {
     private var detector: WakeWordDetector
     private var hideTask: DispatchWorkItem?
     private var silenceTask: DispatchWorkItem?
+    private var wakePendingTask: DispatchWorkItem?
     private var typedCount = 0          // characters of `transcript` already typed into the focused app
 
     static let languages: [(String, String)] = [
@@ -134,8 +135,27 @@ final class DictationModel: ObservableObject {
         case .standby, .done:
             // in wake mode the mic keeps running through the "done" notice, so the phrase can re-trigger right away
             guard wakeMode, isRunning else { return }
-            if let after = detector.feed(text) { beginTranscribing(initial: after) }
+            wakePendingTask?.cancel()
+            if let after = detector.feed(text) {
+                beginTranscribing(initial: after)
+            } else if detector.hasPending {
+                // "spar" arrived at the end of a chunk: give the "k" half a second to show up
+                let task = DispatchWorkItem { [weak self] in
+                    guard let self, self.state == .standby || self.state == .done else { return }
+                    if let after = self.detector.flushPending() { self.beginTranscribing(initial: after) }
+                }
+                wakePendingTask = task
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: task)
+            }
         case .listening:
+            if transcript.isEmpty {
+                // the first dictated chunk starts a new word; anything glued to the wake word, or bare
+                // punctuation that belonged to it, is not dictation
+                let trimmed = text.trimmingCharacters(in: .whitespaces)
+                let glued = text.first.map { $0.isLetter || $0.isNumber } ?? false
+                let hasWord = trimmed.contains(where: { $0.isLetter || $0.isNumber })
+                if wakeMode, glued || !hasWord { return }
+            }
             transcript += text
             deliverLiveText()
             if wakeMode { armSilenceTimer() }

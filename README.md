@@ -28,7 +28,7 @@ The caret glow finds the insertion point through the Accessibility API of the fo
 
 ### Wake word
 
-The trigger is matched on the ASR output word by word with a small edit distance per word (0 for words up to three letters, 1 up to five, 2 beyond), and also as a run-together string, so "hey nimo", "heynemo" and "hey, Nemo," all fire while "hey nemesis" does not. Only the words that just arrived can complete the phrase, so an old "hey nemo" can not re-trigger later. Pick a phrase of two or three ordinary words the model spells consistently; check what it hears with `swift run nemo-feed --wake-test "your phrase"` (synthetic inputs) or by watching the transcript in push-to-talk mode.
+The trigger is matched on the ASR output word by word with a small edit distance per word (0 for words up to three letters, 1 up to five, 2 beyond), and also as a run-together string, so "hey nimo", "heynemo" and "hey, Nemo," all fire while "hey nemesis" does not. Only the words that just arrived can complete the phrase, so an old "hey nemo" can not re-trigger later. The recogniser can split a word across two chunks ("Spar" then "k"): a chunk that starts without a space continues the previous word, a match whose last word is only a prefix of the wake word is held for up to half a second for its ending, and the first dictated chunk has to start a new word, so no tail of the trigger word ends up in the text. Pick a phrase of two or three ordinary words the model spells consistently; check what it hears with `swift run nemo-feed --wake-test "your phrase"` (synthetic inputs) or by watching the transcript in push-to-talk mode.
 
 ## How it fits together
 

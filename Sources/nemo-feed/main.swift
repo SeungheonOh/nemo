@@ -14,11 +14,15 @@ if args.count >= 2, args[1] == "--list-mics" {
 }
 if args.count >= 2, args[1] == "--wake-test" {
     var det = WakeWordDetector(phrase: args.count > 2 ? args[2] : "hey nemo")
-    let stream = ["so I was thinking", "about lunch. Hey Nimo,", "open the window please", "hey nemo", "what time is it",
-                  "heynemo", "hey memo turn it off", "hey", "ne", "mo write this down", "hey nemesis", "a demo"]
+    // chunks as the recogniser emits them: a leading space starts a word, no space continues one
+    let stream: [String] = args.count > 2 && args[2].lowercased() == "spark"
+        ? [" Spar", "k", " write this down", " Spar", "k.", " Spark", " open the file", " spar", "<pause>", " so", " Spar", "row is a bird", " sparks fly", "<pause>"]
+        : [" so I was thinking", " about lunch. Hey Nimo,", " open the window please", " hey nemo", " what time is it",
+           " heynemo", " hey memo turn it off", " hey", " ne", "mo write this down", " hey nemesis", " a demo", " hey ne", "<pause>"]
     for chunk in stream {
-        let r = det.feed(chunk)
-        print("\(chunk.padding(toLength: 28, withPad: " ", startingAt: 0)) -> \(r.map { "TRIGGER, after: \"\($0)\"" } ?? "-")")
+        let r = chunk == "<pause>" ? det.flushPending() : det.feed(chunk)
+        let state = det.hasPending ? " (holding)" : ""
+        print("\(chunk.debugDescription.padding(toLength: 28, withPad: " ", startingAt: 0)) -> \(r.map { "TRIGGER, after: \"\($0)\"" } ?? "-")\(state)")
     }
     exit(0)
 }
