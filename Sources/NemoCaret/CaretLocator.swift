@@ -18,12 +18,13 @@ public enum CaretLocator {
         if let (r, how) = caretBounds(focused) {
             return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
         }
-        if let pos = point(focused, kAXPositionAttribute), let size = self.size(focused, kAXSizeAttribute), size.width > 0, size.height > 0 {
+        if let pos = point(focused, kAXPositionAttribute), let size = self.size(focused, kAXSizeAttribute),
+           size.width > 0, size.height > 0, size.height < 60 {
+            // a single-line field that gives no range bounds (usually empty): the caret is at its left edge.
+            // Bigger elements are skipped: a glow in the corner of a page or document is not on the caret.
             let f = flip(CGRect(origin: pos, size: size), primaryHeight)
-            // an empty field or an app without range bounds: sit where the first character would go
-            let caretH: CGFloat = 18
-            let y = f.height < 44 ? f.midY - caretH / 2 : f.maxY - 12 - caretH
-            return Hit(rect: CGRect(x: f.minX + 12, y: y, width: 2, height: caretH), precise: false, method: "element frame")
+            let caretH = min(18, f.height - 6)
+            return Hit(rect: CGRect(x: f.minX + 12, y: f.midY - caretH / 2, width: 2, height: caretH), precise: false, method: "field frame")
         }
         return nil
     }
