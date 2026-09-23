@@ -303,14 +303,13 @@ final class CaretGlowPanel {
 
 /// The effect: a soft glow around the caret in two layers that breathes, swells a little with the
 /// input level and stretches slightly while gliding; under it the logo, a small black square (네모)
-/// that hangs from the glow, trailing and leaning into the motion, and sends out a faint ring each
-/// time a chunk of text lands. Appearances start small and spring to size.
+/// that hangs from the glow and trails the motion a little. A landing chunk only warms its shadow
+/// for a moment. Appearances start small and spring to size.
 struct CaretGlowView: View {
     @ObservedObject var model: DictationModel
     @ObservedObject var geometry: CaretGeometry
     @State private var breathe = false
     @State private var flash = false
-    @State private var ring: Double = 1          // 0 → 1 over a pulse; 1 means gone
     @State private var entrance: CGFloat = 1
 
     private var accent: Color {
@@ -328,10 +327,10 @@ struct CaretGlowView: View {
         let h = geometry.caretHeight
         let v = geometry.velocity
         let stretch = min(geometry.speed / 900, 0.6)
-        // the square hangs from the glow: it trails the motion a little and leans into it
-        let lagX = max(-9, min(9, -v.dx * 0.012))
-        let lagY = max(-6, min(6, v.dy * 0.010))     // AppKit +y is up; SwiftUI +y is down
-        let tilt = Angle.degrees(Double(max(-16, min(16, v.dx * 0.025))))
+        // the square hangs from the glow: it trails the motion a little and leans into it, gently
+        let lagX = max(-5, min(5, -v.dx * 0.008))
+        let lagY = max(-3, min(3, v.dy * 0.006))     // AppKit +y is up; SwiftUI +y is down
+        let tilt = Angle.degrees(Double(max(-7, min(7, v.dx * 0.012))))
         let r: CGFloat = 12 + (breathe ? 2.5 : 0) + 6 * level
         ZStack {
             // wide, faint halo
@@ -344,20 +343,14 @@ struct CaretGlowView: View {
                 .fill(RadialGradient(colors: [accent.opacity(writing ? 0.5 : 0.28), accent.opacity(0.12), .clear], center: .center, startRadius: 0, endRadius: r))
                 .frame(width: r * 2 * (1 + stretch), height: max(r * 2, h + 6))
                 .blur(radius: 1.5)
-                .brightness(flash ? 0.2 : 0)
-            // pulse ring drifting out from the square
-            Circle()
-                .strokeBorder(accent.opacity(0.6 * (1 - ring)), lineWidth: 1)
-                .frame(width: 9 + 30 * ring, height: 9 + 30 * ring)
-                .offset(x: lagX, y: h / 2 + 9 + lagY)
+                .brightness(flash ? 0.12 : 0)
             // the logo
             RoundedRectangle(cornerRadius: 1.8, style: .continuous)
                 .fill(.black)
                 .frame(width: 7, height: 7)
                 .overlay(RoundedRectangle(cornerRadius: 1.8, style: .continuous).strokeBorder(.white.opacity(0.5), lineWidth: 0.5))
-                .shadow(color: accent.opacity(flash ? 0.95 : 0.6), radius: flash ? 4.5 : 2.5)
+                .shadow(color: accent.opacity(flash ? 0.85 : 0.6), radius: flash ? 3.5 : 2.5)
                 .rotationEffect(tilt)
-                .scaleEffect(flash ? 1.22 : 1)
                 .opacity(model.state == .loading ? (breathe ? 0.45 : 0.9) : 1)
                 .offset(x: lagX, y: h / 2 + 9 + lagY)
         }
@@ -372,10 +365,8 @@ struct CaretGlowView: View {
             DispatchQueue.main.async { withAnimation(.spring(response: 0.45, dampingFraction: 0.6)) { entrance = 1 } }
         }
         .onChange(of: model.insertPulse) { _, _ in
-            ring = 0
-            DispatchQueue.main.async { withAnimation(.easeOut(duration: 0.6)) { ring = 1 } }
-            withAnimation(.spring(response: 0.25, dampingFraction: 0.45)) { flash = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.14) { withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) { flash = false } }
+            withAnimation(.easeOut(duration: 0.08)) { flash = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { withAnimation(.easeOut(duration: 0.5)) { flash = false } }
         }
     }
 }
