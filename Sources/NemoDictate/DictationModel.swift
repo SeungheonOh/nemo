@@ -28,7 +28,7 @@ final class DictationModel: ObservableObject {
     @Published var language = UserDefaults.standard.string(forKey: "language") ?? "auto" { didSet { UserDefaults.standard.set(language, forKey: "language") } }
     @Published var latencyMs = UserDefaults.standard.object(forKey: "latencyMs") as? Int ?? 560 { didSet { UserDefaults.standard.set(latencyMs, forKey: "latencyMs") } }
     @Published var micUID: String? = UserDefaults.standard.string(forKey: "micUID") { didSet { UserDefaults.standard.set(micUID, forKey: "micUID") } }
-    @Published var outputMode = OutputMode(rawValue: UserDefaults.standard.string(forKey: "outputMode") ?? "") ?? .clipboard { didSet { UserDefaults.standard.set(outputMode.rawValue, forKey: "outputMode") } }
+    @Published var outputMode = OutputMode(rawValue: UserDefaults.standard.string(forKey: "outputMode") ?? "") ?? .clipboard { didSet { UserDefaults.standard.set(outputMode.rawValue, forKey: "outputMode"); pillVisible = pillWanted } }
     @Published var wakeWord = UserDefaults.standard.string(forKey: "wakeWord") ?? "hey nemo" { didSet { UserDefaults.standard.set(wakeWord, forKey: "wakeWord"); detector = WakeWordDetector(phrase: wakeWord) } }
     @Published var wakeMode = UserDefaults.standard.bool(forKey: "wakeMode") { didSet { UserDefaults.standard.set(wakeMode, forKey: "wakeMode") } }
     @Published var silenceStop = UserDefaults.standard.object(forKey: "silenceStop") as? Double ?? 2.5 { didSet { UserDefaults.standard.set(silenceStop, forKey: "silenceStop") } }
@@ -224,6 +224,29 @@ final class DictationModel: ObservableObject {
         }
     }
 
+    // MARK: - Demo (NEMO_DEMO=1: drives the pill without a microphone, for UI work)
+
+    func demoStream() {
+        outputMode = .clipboard
+        statusLine = "Listening · demo · 560 ms"
+        set(.listening)
+        let words = """
+        The quick brown fox jumps over the lazy dog while the indicator keeps growing line by line, \
+        so that a longer dictation stays readable instead of being cut off after two lines. Once it reaches \
+        about ten lines it stops growing and scrolls, keeping the newest words at the bottom where the eye \
+        expects them, and the status line stays put underneath the text the whole time. This sentence is \
+        here to push it past the limit so the scrolling behaviour can be checked as well, and then some more \
+        words follow so that the oldest lines have to leave through the top while the latest ones stay in view.
+        """.split(separator: " ").map(String.init)
+        var i = 0
+        Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] t in
+            guard let self, i < words.count else { t.invalidate(); return }
+            self.transcript += (i == 0 ? "" : " ") + words[i]
+            self.level = Float.random(in: 0.2...0.9)
+            i += 1
+        }
+    }
+
     // MARK: - Timers
 
     private func armSilenceTimer() {
@@ -253,9 +276,19 @@ final class DictationModel: ObservableObject {
         scheduleHide(after: 4)
     }
 
+    /// When typing straight into the focused field the text itself is the feedback, so the pill stays
+    /// hidden; only failures are still shown.
+    private var pillWanted: Bool {
+        switch state {
+        case .idle: return false
+        case .failed: return true
+        default: return outputMode != .type
+        }
+    }
+
     private func set(_ s: DictationState) {
         state = s
-        pillVisible = s != .idle
+        pillVisible = pillWanted
         onStateChange?(s)
     }
 }

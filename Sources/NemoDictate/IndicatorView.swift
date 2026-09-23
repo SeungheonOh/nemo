@@ -1,21 +1,25 @@
 import SwiftUI
 
 /// The floating pill: state dot, live waveform, streaming transcript, status line.
+/// It grows with the transcript up to `maxTextHeight`, then scrolls to keep the newest words visible;
+/// the measured height is reported so the panel can follow.
 struct IndicatorView: View {
     @ObservedObject var model: DictationModel
+    var onHeightChange: (CGFloat) -> Void = { _ in }
+    @State private var textHeight: CGFloat = 0
+
+    static let width: CGFloat = 520
+    static let minHeight: CGFloat = 68
+    static let maxTextHeight: CGFloat = 200   // about ten lines
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(alignment: .top, spacing: 14) {
             StateDot(state: model.state)
             WaveformBars(level: model.level, active: model.state == .listening)
                 .frame(width: 54, height: 26)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(model.transcript.isEmpty ? placeholder : model.transcript)
-                    .font(.system(size: 15, weight: .medium, design: .rounded))
-                    .foregroundStyle(model.transcript.isEmpty ? .secondary : .primary)
-                    .lineLimit(2)
-                    .truncationMode(.head)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 4) {
+                transcriptBlock
+                    .padding(.top, 3)   // first line sits on the controls' centre line
                 Text(model.statusLine)
                     .font(.system(size: 11, weight: .regular, design: .rounded))
                     .foregroundStyle(.secondary)
@@ -32,9 +36,40 @@ struct IndicatorView: View {
             .disabled(model.state == .loading || model.state == .finishing)
         }
         .padding(.horizontal, 18)
-        .frame(width: 520, height: 68)
+        .padding(.vertical, 14)
+        .frame(width: Self.width)
+        .frame(minHeight: Self.minHeight)
+        .fixedSize(horizontal: false, vertical: true)   // take the ideal height, whatever the window proposes
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(.white.opacity(0.14), lineWidth: 1))
+        .background(GeometryReader { g in Color.clear.preference(key: PillHeightKey.self, value: g.size.height) })
+        .onPreferenceChange(PillHeightKey.self) { onHeightChange($0) }
+    }
+
+    private var transcriptBlock: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                Text(model.transcript.isEmpty ? placeholder : model.transcript)
+                    .font(.system(size: 15, weight: .medium, design: .rounded))
+                    .foregroundStyle(model.transcript.isEmpty ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(GeometryReader { g in Color.clear.preference(key: TextHeightKey.self, value: g.size.height) })
+                    .id("end")
+            }
+            .frame(height: min(max(textHeight, 20), Self.maxTextHeight))
+            .mask(
+                // once it scrolls, the oldest line fades out through the top instead of being cut mid-glyph
+                LinearGradient(stops: [.init(color: textHeight > Self.maxTextHeight ? .clear : .black, location: 0),
+                                       .init(color: .black, location: 0.14),
+                                       .init(color: .black, location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+            )
+            .onPreferenceChange(TextHeightKey.self) { h in
+                textHeight = h
+                if h > Self.maxTextHeight { DispatchQueue.main.async { proxy.scrollTo("end", anchor: .bottom) } }
+            }
+        }
     }
 
     private var placeholder: String {
@@ -57,6 +92,16 @@ struct IndicatorView: View {
         default: return "mic.fill"
         }
     }
+}
+
+private struct PillHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct TextHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 struct StateDot: View {

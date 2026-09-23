@@ -7,7 +7,7 @@ final class IndicatorPanel {
     private var shown = false
 
     init(model: DictationModel) {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 520, height: 68),
+        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: IndicatorView.width, height: IndicatorView.minHeight),
                         styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.level = .statusBar
         panel.isOpaque = false
@@ -17,8 +17,24 @@ final class IndicatorPanel {
         panel.isMovableByWindowBackground = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.isReleasedWhenClosed = false
-        panel.contentView = NSHostingView(rootView: IndicatorView(model: model))
         panel.alphaValue = 0
+        // the pill is anchored to the top of the window and reports its height; the window follows it downward
+        let root = IndicatorView(model: model, onHeightChange: { [weak self] h in self?.fit(height: h) })
+            .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+        let hosting = NSHostingView(rootView: root)
+        hosting.sizingOptions = []
+        panel.contentView = hosting
+    }
+
+    private func fit(height: CGFloat) {
+        let h = max(IndicatorView.minHeight, ceil(height))
+        var f = panel.frame
+        guard abs(f.height - h) > 0.5 else { return }
+        let top = f.maxY
+        f.size.height = h
+        f.origin.y = top - h
+        panel.setFrame(f, display: true)
+        panel.invalidateShadow()
     }
 
     func setVisible(_ visible: Bool) {

@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.panel = panel
         statusBar = StatusBarController(model: model)
         model.$pillVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in panel.setVisible(visible) }.store(in: &cancellables)
+        if ProcessInfo.processInfo.environment["NEMO_DEMO"] != nil { model.demoStream(); return }
         if model.wakeMode { model.start() }
         hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)) { [weak self] in self?.model.toggle() }
     }

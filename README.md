@@ -2,8 +2,8 @@
 
 A native macOS menu-bar app for local speech recognition, built on [nemoasr-c](../nemoasr-c): NVIDIA Nemotron 3.5 ASR Streaming 0.6B implemented from scratch in C + Metal. Swift/SwiftUI for the app, the C runtime linked in as a static library. Nothing leaves the machine.
 
-- Press **Option + Space** (or click the microphone in the menu bar) to start. A floating pill appears at the top of the screen with a pulsing dot, a live waveform of your input level and the transcript streaming in as you speak.
-- Press Option + Space again (or the stop button on the pill) to finish. The text goes to the clipboard, or is typed straight into whatever text field has focus (**Output** menu), the pill shows a check mark and fades out.
+- Press **Option + Space** (or click the microphone in the menu bar) to start. A floating pill appears at the top of the screen with a pulsing dot, a live waveform of your input level and the transcript streaming in as you speak. The pill grows with the text, up to about ten lines, then scrolls so the newest words stay in view.
+- Press Option + Space again (or the stop button on the pill) to finish. The text goes to the clipboard, or is typed straight into whatever text field has focus (**Output** menu), the pill shows a check mark and fades out. In the typing mode the text landing in the field is the feedback, so the pill stays hidden altogether; only errors are still shown.
 - **Wake-word mode** (Wake word menu) keeps the microphone and the model running all the time. The menu-bar icon turns into a teal ear; say the trigger phrase ("hey nemo" by default) and transcription starts, anything said in the same breath after the phrase is kept. It stops by itself after 1.5 / 2.5 / 4 s without new words, delivers the text and goes back to waiting for the phrase. Option + Space starts a segment without the phrase, or ends one early.
 - Outside wake-word mode the model loads on demand each time you start, about 300 ms including GPU warm-up, and is released when you stop, so the app costs nothing while idle.
 
@@ -20,7 +20,7 @@ Menu bar: Start/Stop, Copy Last Transcript, Language (auto-detect, English, Kore
 
 ### Typing into the focused app
 
-"Type into the focused text field" posts the recognised text as keyboard events with Unicode payloads, so it works in any app and any script, with no clipboard round trip. macOS requires the **Accessibility** permission for that: choosing the option the first time opens the system prompt, add NemoDictate in System Settings → Privacy & Security → Accessibility, then pick the option again. The text streams in as it is recognised (the RNNT decoder never retracts, so nothing has to be deleted). If the permission is missing at delivery time the text is copied to the clipboard instead and the status line says so. The bundle is ad-hoc signed, so after rebuilding you may have to remove and re-add it in the Accessibility list.
+"Type into the focused text field" posts the recognised text as keyboard events with Unicode payloads, so it works in any app and any script, with no clipboard round trip. No pill is shown in this mode (the menu-bar icon still reflects the state), except for a failure message. macOS requires the **Accessibility** permission for that: choosing the option the first time opens the system prompt, add NemoDictate in System Settings → Privacy & Security → Accessibility, then pick the option again. The text streams in as it is recognised (the RNNT decoder never retracts, so nothing has to be deleted). If the permission is missing at delivery time the text is copied to the clipboard instead and the status line says so. The bundle is ad-hoc signed, so after rebuilding you may have to remove and re-add it in the Accessibility list.
 
 ### Wake word
 
@@ -58,7 +58,7 @@ flowchart LR
 | `Sources/nemo-feed` | headless check: feeds an audio file through the same bridge and prints the transcript |
 | `Scripts/bundle.sh`, `Resources/Info.plist` | assembles the `.app` (`LSUIElement`, microphone usage string), ad-hoc signed |
 
-`swift run nemo-feed ../nemoasr-c/ref/fox48k.wav` transcribes a file through the exact Swift-to-C path the app uses, without a microphone. `swift run nemo-feed --list-mics` prints the input devices the menu will show. `swift run nemo-feed --wake-test "hey nemo"` runs the wake-word matcher over a few synthetic transcripts.
+`NEMO_DEMO=1 swift run NemoDictate` drives the pill with canned text and no microphone, for working on the UI. `swift run nemo-feed ../nemoasr-c/ref/fox48k.wav` transcribes a file through the exact Swift-to-C path the app uses, without a microphone. `swift run nemo-feed --list-mics` prints the input devices the menu will show. `swift run nemo-feed --wake-test "hey nemo"` runs the wake-word matcher over a few synthetic transcripts.
 
 ## Notes
 
