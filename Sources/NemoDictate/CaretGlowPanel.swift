@@ -23,6 +23,9 @@ final class CaretGlowPanel {
     private let fixedRect: CGRect?   // demo mode: no tracking, a fixed spot on screen
     private var lastNote = ""
     private var lastLogged = (rect: CGRect.zero, at: Date.distantPast)
+    private var lastPrecise = Date.distantPast   // when the caret itself (not a fallback) was last seen
+    private var observer: AXObserver?
+    private var observedPID: pid_t = 0
 
     init(model: DictationModel) {
         let s = CaretGlowPanel.size
@@ -47,18 +50,57 @@ final class CaretGlowPanel {
         if visible { show() } else { hide() }
     }
 
-    /// Called right after text was typed: the caret has just moved, catch up without waiting for the timer.
-    func nudge() { if shown { poll() } }
+    /// Called right after text was typed: the caret has just moved; the app needs a moment to lay out.
+    func nudge() {
+        guard shown else { return }
+        poll()
+        for ms in [40, 120, 300] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(ms)) { [weak self] in self?.poll() }
+        }
+    }
+
+    // MARK: - AX notifications
+
+    /// Subscribe to selection, value and focus changes in the front app; they arrive on the main run loop.
+    private func observe(_ pid: pid_t?) {
+        guard let pid, pid != observedPID else { return }
+        unobserve()
+        var obs: AXObserver?
+        let cb: AXObserverCallback = { _, _, _, refcon in
+            guard let refcon else { return }
+            Unmanaged<CaretGlowPanel>.fromOpaque(refcon).takeUnretainedValue().poll()
+        }
+        guard AXObserverCreate(pid, cb, &obs) == .success, let obs else { return }
+        let app = AXUIElementCreateApplication(pid)
+        let me = Unmanaged.passUnretained(self).toOpaque()
+        for name in [kAXSelectedTextChangedNotification, kAXValueChangedNotification, kAXFocusedUIElementChangedNotification,
+                     kAXWindowMovedNotification, kAXWindowResizedNotification] {
+            AXObserverAddNotification(obs, app, name as CFString, me)
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
+        observer = obs
+        observedPID = pid
+    }
+
+    private func unobserve() {
+        if let observer { CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode) }
+        observer = nil
+        observedPID = 0
+    }
 
     private func show() {
         guard !shown else { return }
         shown = true
         placed = false
         lastNote = ""
+        lastPrecise = .distantPast
         DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
+        observe(NSWorkspace.shared.frontmostApplication?.processIdentifier)
         poll()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15, repeats: true) { [weak self] _ in self?.poll() }
+        // the observer below reports selection changes as they happen; this only catches scrolling and
+        // window moves, which have no text notification
+        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.poll() }
     }
 
     private func hide() {
@@ -66,6 +108,7 @@ final class CaretGlowPanel {
         shown = false
         timer?.invalidate()
         timer = nil
+        unobserve()
         fade(to: 0, duration: 0.3, thenOrderOut: true)
     }
 
@@ -78,6 +121,7 @@ final class CaretGlowPanel {
         inFlight = true
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        observe(pid)
         queue.async { [weak self] in
             let (hit, note) = CaretLocator.diagnose(primaryHeight: primaryHeight, pid: pid)
             DispatchQueue.main.async {
@@ -90,7 +134,16 @@ final class CaretGlowPanel {
                     self.lastLogged = (hit?.rect ?? .zero, Date())
                     DebugLog.write(hit.map { "caret \(note) at \(Int($0.rect.minX)),\(Int($0.rect.minY)) h\(Int($0.rect.height))" } ?? "caret \(note)")
                 }
-                if let hit { self.place(hit) } else { self.lost() }
+                if let hit, hit.precise {
+                    self.lastPrecise = Date()
+                    self.place(hit)
+                } else if Date().timeIntervalSince(self.lastPrecise) < 2 {
+                    // the editor is mid-update (it happens while keystrokes land): stay where the caret was
+                } else if let hit {
+                    self.place(hit)
+                } else {
+                    self.lost()
+                }
             }
         }
     }
@@ -106,7 +159,7 @@ final class CaretGlowPanel {
             fade(to: 1, duration: 0.2, thenOrderOut: false)
         } else if abs(panel.frame.origin.x - origin.x) > 0.5 || abs(panel.frame.origin.y - origin.y) > 0.5 {
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.12
+                ctx.duration = 0.07
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().setFrameOrigin(origin)
             }
