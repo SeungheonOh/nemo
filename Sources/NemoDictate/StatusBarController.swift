@@ -20,12 +20,13 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     func refresh() {
         let listening = model.state == .listening
+        let standby = model.state == .standby
         let busy = model.state == .loading || model.state == .finishing
-        let name = listening ? "mic.fill" : (busy ? "mic.badge.xmark" : "mic")
+        let name = listening ? "mic.fill" : standby ? "ear" : (busy ? "mic.badge.xmark" : "mic")
         let image = NSImage(systemSymbolName: name, accessibilityDescription: "NemoDictate")
         image?.isTemplate = !listening
         item.button?.image = image
-        item.button?.contentTintColor = listening ? .systemRed : nil
+        item.button?.contentTintColor = listening ? .systemRed : (standby ? .systemTeal : nil)
     }
 
     private func buildMenu() -> NSMenu {
@@ -67,6 +68,39 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         mic.submenu = NSMenu()
         mic.tag = 3
         menu.addItem(mic)
+
+        let outMenu = NSMenu()
+        for (mode, title) in [(OutputMode.clipboard, "Copy to clipboard"), (OutputMode.type, "Type into the focused text field")] {
+            let mi = NSMenuItem(title: title, action: #selector(pickOutput(_:)), keyEquivalent: "")
+            mi.representedObject = mode.rawValue
+            mi.target = self
+            outMenu.addItem(mi)
+        }
+        let out = NSMenuItem(title: "Output", action: nil, keyEquivalent: "")
+        out.submenu = outMenu
+        out.tag = 4
+        menu.addItem(out)
+
+        let wakeMenu = NSMenu()
+        let enable = NSMenuItem(title: "Wake-word mode (always listening)", action: #selector(toggleWake(_:)), keyEquivalent: "")
+        enable.target = self
+        enable.tag = 41
+        wakeMenu.addItem(enable)
+        let setWord = NSMenuItem(title: "Set wake word…", action: #selector(setWakeWord(_:)), keyEquivalent: "")
+        setWord.target = self
+        setWord.tag = 42
+        wakeMenu.addItem(setWord)
+        wakeMenu.addItem(.separator())
+        for secs in DictationModel.silenceOptions {
+            let mi = NSMenuItem(title: "Stop after \(String(format: "%.1f", secs)) s of silence", action: #selector(pickSilence(_:)), keyEquivalent: "")
+            mi.representedObject = secs
+            mi.target = self
+            wakeMenu.addItem(mi)
+        }
+        let wake = NSMenuItem(title: "Wake word", action: nil, keyEquivalent: "")
+        wake.submenu = wakeMenu
+        wake.tag = 5
+        menu.addItem(wake)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit NemoDictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
@@ -101,15 +135,27 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         if let mic = menu.item(withTag: 3)?.submenu { rebuildMicrophoneMenu(mic) }
         if let toggle = menu.item(withTag: 1) {
-            toggle.title = model.state == .listening ? "Stop Listening" : "Start Listening"
+            switch model.state {
+            case .listening: toggle.title = "Stop Transcribing"
+            case .standby: toggle.title = "Start Transcribing Now"
+            default: toggle.title = "Start Listening"
+            }
             toggle.isEnabled = !(model.state == .loading || model.state == .finishing)
         }
         menu.item(withTag: 2)?.isEnabled = !model.lastTranscript.isEmpty
-        for item in menu.items where item.tag != 3 {
+        for item in menu.items where item.tag != 3 && item.tag != 4 && item.tag != 5 {
             for mi in item.submenu?.items ?? [] {
                 if let code = mi.representedObject as? String { mi.state = code == model.language ? .on : .off }
                 if let ms = mi.representedObject as? Int { mi.state = ms == model.latencyMs ? .on : .off }
             }
+        }
+        for mi in menu.item(withTag: 4)?.submenu?.items ?? [] {
+            mi.state = (mi.representedObject as? String) == model.outputMode.rawValue ? .on : .off
+        }
+        if let wake = menu.item(withTag: 5)?.submenu {
+            wake.item(withTag: 41)?.state = model.wakeMode ? .on : .off
+            wake.item(withTag: 42)?.title = "Set wake word… (“\(model.wakeWord)”)"
+            for mi in wake.items { if let secs = mi.representedObject as? Double { mi.state = secs == model.silenceStop ? .on : .off } }
         }
     }
 
@@ -118,4 +164,24 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func pickLanguage(_ sender: NSMenuItem) { if let c = sender.representedObject as? String { model.language = c } }
     @objc private func pickLatency(_ sender: NSMenuItem) { if let ms = sender.representedObject as? Int { model.latencyMs = ms } }
     @objc private func pickMic(_ sender: NSMenuItem) { model.micUID = sender.representedObject as? String }
+    @objc private func pickOutput(_ sender: NSMenuItem) { if let raw = sender.representedObject as? String, let m = OutputMode(rawValue: raw) { model.setOutputMode(m) } }
+    @objc private func pickSilence(_ sender: NSMenuItem) { if let s = sender.representedObject as? Double { model.silenceStop = s } }
+    @objc private func toggleWake(_ sender: NSMenuItem) { model.setWakeMode(!model.wakeMode) }
+
+    @objc private func setWakeWord(_ sender: NSMenuItem) {
+        let alert = NSAlert()
+        alert.messageText = "Wake word"
+        alert.informativeText = "Say this phrase to start transcribing while in wake-word mode. Two or three plain words work best; small recognition errors are tolerated."
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        field.stringValue = model.wakeWord
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.window.initialFirstResponder = field
+        if alert.runModal() == .alertFirstButtonReturn {
+            let phrase = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !phrase.isEmpty { model.wakeWord = phrase }
+        }
+    }
 }

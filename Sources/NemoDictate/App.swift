@@ -1,5 +1,6 @@
 import AppKit
 import Carbon
+import Combine
 
 /// Menu-bar-only app: Option+Space (or the menu) starts listening; the model loads on demand
 /// (about 300 ms), a floating indicator shows the live transcript, and stopping copies the text
@@ -20,16 +21,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusBar: StatusBarController?
     private var panel: IndicatorPanel?
     private var hotKey: HotKey?
+    private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let panel = IndicatorPanel(model: model)
         self.panel = panel
         statusBar = StatusBarController(model: model)
-        model.onStateChange = { [weak self] state in self?.panel?.update(for: state) }
+        model.$pillVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in panel.setVisible(visible) }.store(in: &cancellables)
+        if model.wakeMode { model.start() }
         hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)) { [weak self] in self?.model.toggle() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        if model.state == .listening { model.stop() }
+        if model.isRunning { model.stop() }
     }
 }

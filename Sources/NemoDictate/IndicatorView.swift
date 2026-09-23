@@ -32,17 +32,15 @@ struct IndicatorView: View {
             .disabled(model.state == .loading || model.state == .finishing)
         }
         .padding(.horizontal, 18)
-        .padding(.vertical, 12)
-        .frame(width: 520)
+        .frame(width: 520, height: 68)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(.white.opacity(0.14), lineWidth: 1))
-        .shadow(color: .black.opacity(0.28), radius: 20, y: 10)
-        .padding(24)
     }
 
     private var placeholder: String {
         switch model.state {
         case .loading: return "Loading Nemotron…"
+        case .standby: return "Standing by"
         case .listening: return "Listening…"
         case .finishing: return "Finishing…"
         case .failed: return "Something went wrong"
@@ -53,6 +51,7 @@ struct IndicatorView: View {
     private var buttonIcon: String {
         switch model.state {
         case .listening: return "stop.fill"
+        case .standby: return "waveform"
         case .done: return "checkmark"
         case .failed: return "xmark"
         default: return "mic.fill"
@@ -88,6 +87,7 @@ struct StateDot: View {
     private var color: Color {
         switch state {
         case .listening: return .red
+        case .standby: return .teal
         case .loading, .finishing: return .orange
         case .done: return .green
         case .failed: return .gray

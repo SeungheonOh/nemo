@@ -12,7 +12,17 @@ if args.count >= 2, args[1] == "--list-mics" {
     }
     exit(0)
 }
-guard args.count >= 2 else { fputs("usage: nemo-feed file.wav [language] [latency_ms] | --list-mics\n", stderr); exit(2) }
+if args.count >= 2, args[1] == "--wake-test" {
+    var det = WakeWordDetector(phrase: args.count > 2 ? args[2] : "hey nemo")
+    let stream = ["so I was thinking", "about lunch. Hey Nimo,", "open the window please", "hey nemo", "what time is it",
+                  "heynemo", "hey memo turn it off", "hey", "ne", "mo write this down", "hey nemesis", "a demo"]
+    for chunk in stream {
+        let r = det.feed(chunk)
+        print("\(chunk.padding(toLength: 28, withPad: " ", startingAt: 0)) -> \(r.map { "TRIGGER, after: \"\($0)\"" } ?? "-")")
+    }
+    exit(0)
+}
+guard args.count >= 2 else { fputs("usage: nemo-feed file.wav [language] [latency_ms] | --list-mics | --wake-test [phrase]\n", stderr); exit(2) }
 let language = args.count > 2 ? args[2] : "en-US"
 let latency = args.count > 3 ? Int32(args[3]) ?? 560 : 560
 
