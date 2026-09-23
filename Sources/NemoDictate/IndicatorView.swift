@@ -82,7 +82,7 @@ struct StateDot: View {
         }
         .frame(width: 26, height: 26)
         .onAppear { pulse = true }
-        .onChange(of: state) { _ in pulse = false; DispatchQueue.main.async { pulse = true } }
+        .onChange(of: state) { _, _ in pulse = false; DispatchQueue.main.async { pulse = true } }
     }
 
     private var color: Color {
@@ -110,13 +110,13 @@ struct WaveformBars: View {
                     .frame(width: 3, height: max(3, CGFloat(v) * 26))
             }
         }
-        .onChange(of: level) { new in
+        .onChange(of: level) { _, new in
             var h = history
             h.removeFirst()
             h.append(active ? new : 0)
             withAnimation(.easeOut(duration: 0.12)) { history = h }
         }
-        .onChange(of: active) { on in
+        .onChange(of: active) { _, on in
             if !on { withAnimation(.easeOut(duration: 0.3)) { history = Array(repeating: 0, count: 9) } }
         }
     }
