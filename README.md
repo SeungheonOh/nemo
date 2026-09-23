@@ -3,7 +3,7 @@
 A native macOS menu-bar app for local speech recognition, built on [nemoasr-c](../nemoasr-c): NVIDIA Nemotron 3.5 ASR Streaming 0.6B implemented from scratch in C + Metal. Swift/SwiftUI for the app, the C runtime linked in as a static library. Nothing leaves the machine.
 
 - Press **Option + Space** (or click the microphone in the menu bar) to start. A floating pill appears at the top of the screen with a pulsing dot, a live waveform of your input level and the transcript streaming in as you speak. The pill grows with the text, up to about ten lines, then scrolls so the newest words stay in view.
-- Press Option + Space again (or the stop button on the pill) to finish. The text goes to the clipboard, or is typed straight into whatever text field has focus (**Output** menu), the pill shows a check mark and fades out. In the typing mode the pill stays hidden; instead a slight glow sits on the insertion point of the app you are dictating into, with a small black square under it (네모, Nemo, is Korean for square), swelling a little with your voice and ticking each time a chunk lands.
+- Press Option + Space again (or the stop button on the pill) to finish. The text goes to the clipboard, or is typed straight into whatever text field has focus (**Output** menu), the pill shows a check mark and fades out. In the typing mode the pill never appears; instead a slight glow sits on the insertion point of the app you are dictating into, with a small black square under it (네모, Nemo, is Korean for square), swelling a little with your voice and ticking each time a chunk lands. The status line is in the menu-bar menu, and the icon turns into a warning triangle if something fails.
 - **Wake-word mode** (Wake word menu) keeps the microphone and the model running all the time. The menu-bar icon turns into a teal ear; say the trigger phrase ("hey nemo" by default) and transcription starts, anything said in the same breath after the phrase is kept. It stops by itself after 1.5 / 2.5 / 4 s without new words, delivers the text and goes back to waiting for the phrase. Option + Space starts a segment without the phrase, or ends one early.
 - Outside wake-word mode the model loads on demand each time you start, about 300 ms including GPU warm-up, and is released when you stop, so the app costs nothing while idle.
 
@@ -20,11 +20,11 @@ Menu bar: Start/Stop, Copy Last Transcript, Language (auto-detect, English, Kore
 
 ### Typing into the focused app
 
-"Type into the focused text field" posts the recognised text as keyboard events with Unicode payloads, so it works in any app and any script, with no clipboard round trip. macOS requires the **Accessibility** permission for that: choosing the option the first time opens the system prompt, add NemoDictate in System Settings → Privacy & Security → Accessibility, then pick the option again. The text streams in as it is recognised (the RNNT decoder never retracts, so nothing has to be deleted). If the permission is missing at delivery time the text is copied to the clipboard instead, and the pill comes up with a notice even in this mode.
+"Type into the focused text field" posts the recognised text as keyboard events with Unicode payloads, so it works in any app and any script, with no clipboard round trip. macOS requires the **Accessibility** permission for that: choosing the option the first time opens the system prompt, add NemoDictate in System Settings → Privacy & Security → Accessibility, then pick the option again. The text streams in as it is recognised (the RNNT decoder never retracts, so nothing has to be deleted). If the permission is missing at delivery time the text is copied to the clipboard instead, the system prompt is raised again and the menu's status line says why.
 
 macOS ties that permission to the app's code signature. `Scripts/bundle.sh` therefore signs with your Apple Development (or Developer ID) certificate when `security find-identity` shows one, which keeps the permission across rebuilds; with only an ad-hoc signature the permission is lost on every build and has to be re-added. `CODESIGN_ID` overrides the choice.
 
-The caret glow finds the insertion point through the Accessibility API of the focused app: the bounds of the selected text range (the empty range itself, or the character after or before the caret), then WebKit/Chromium text-marker ranges, then, for a small single-line field only, its left edge. If none of those answer, nothing is shown rather than guessing. What the lookup sees, and whether the app is trusted, is appended to `~/Library/Logs/NemoDictate.log` whenever a typing session starts or the answer changes, for apps that misbehave.
+The caret glow finds the insertion point through the Accessibility API of the focused app: the bounds of the selected text range (the empty range itself, or the character after or before the caret), then WebKit/Chromium text-marker ranges, then, for a small single-line field only, its left edge. Electron and Chromium apps keep their accessibility tree switched off until an assistive client asks, so the first lookup in such an app sets `AXManualAccessibility` on it and the tree is up a moment later. If none of those answer, nothing is shown rather than guessing. What the lookup sees, and whether the app is trusted, is appended to `~/Library/Logs/NemoDictate.log` whenever a typing session starts or the answer changes, for apps that misbehave.
 
 ### Wake word
 
@@ -53,12 +53,11 @@ flowchart LR
 | `DictationModel.swift` | idle → loading → (standby ⇄) listening → finishing → done state, transcript, level, persisted settings, silence timeout |
 | `TextInserter.swift` | Accessibility check and prompt, typing text into the focused app through `CGEvent` keyboard events |
 | `CaretGlowPanel.swift` | click-through panel that follows the insertion point in typing mode; the glow and the square logo |
-| `Palette.swift` | per-state colour triples for the glow, rim, waveform and caret effect |
 | `Sources/NemoCaret/CaretLocator.swift` | insertion-point lookup through the Accessibility API |
 | `DebugLog.swift` | short lines to `~/Library/Logs/NemoDictate.log` about trust and caret lookups |
 | `Sources/NemoAudio/WakeWordDetector.swift` | trigger-phrase matching on streaming words, per-word and run-together edit distance |
 | `Transcriber.swift` | microphone permission, `AVAudioEngine` input tap, mono mix and level, calls into the C library on a serial queue |
-| `IndicatorPanel.swift` / `IndicatorView.swift` | the floating pill: borderless non-activating panel on all Spaces, oversized so the SwiftUI-drawn shadow and animated underglow never clip; pulsing state dot, gradient waveform, streaming text with a blinking caret, status |
+| `IndicatorPanel.swift` / `IndicatorView.swift` | the floating pill: borderless non-activating panel on all Spaces with the native window shadow, SwiftUI content with pulsing state dot, waveform bars, streaming text, status |
 | `StatusBarController.swift` | `NSStatusItem`, menu, checkmarks for language, latency, microphone, output and wake-word settings |
 | `HotKey.swift` | system-wide hotkey through `RegisterEventHotKey` (no accessibility permission needed) |
 | `Sources/NemoAudio/AudioInputDevice.swift` | CoreAudio input device enumeration (name, UID, rate, channels), shared with `nemo-feed --list-mics` |

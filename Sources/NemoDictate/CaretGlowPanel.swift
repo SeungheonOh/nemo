@@ -76,8 +76,9 @@ final class CaretGlowPanel {
         guard !inFlight else { return }
         inFlight = true
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         queue.async { [weak self] in
-            let (hit, note) = CaretLocator.diagnose(primaryHeight: primaryHeight)
+            let (hit, note) = CaretLocator.diagnose(primaryHeight: primaryHeight, pid: pid)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.inFlight = false
@@ -134,8 +135,16 @@ struct CaretGlowView: View {
     @State private var breathe = false
     @State private var bump = false
 
+    private var accent: Color {
+        switch model.state {
+        case .listening: return Color(red: 0.25, green: 0.90, blue: 1.00)
+        case .done: return Color(red: 0.30, green: 0.90, blue: 0.55)
+        default: return Color(red: 1.00, green: 0.70, blue: 0.25)
+        }
+    }
+
     var body: some View {
-        let accent = model.state.caretColors[0]
+        let accent = self.accent
         let writing = model.state == .listening
         let level = CGFloat(model.level)
         let h = geometry.caretHeight

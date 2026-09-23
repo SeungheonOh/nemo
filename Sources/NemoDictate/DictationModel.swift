@@ -42,7 +42,6 @@ final class DictationModel: ObservableObject {
     private var hideTask: DispatchWorkItem?
     private var silenceTask: DispatchWorkItem?
     private var typedCount = 0          // characters of `transcript` already typed into the focused app
-    private var noticeUntil = Date.distantPast   // while in the future the pill stays up to show `statusLine`, whatever the mode
 
     static let languages: [(String, String)] = [
         ("auto", "Detect language"), ("en-US", "English"), ("ko-KR", "Korean"), ("ja-JP", "Japanese"),
@@ -80,9 +79,8 @@ final class DictationModel: ObservableObject {
 
     func setOutputMode(_ mode: OutputMode) {
         if mode == .type, !TextInserter.isTrusted {
-            TextInserter.requestTrust()
-            notice("Grant Accessibility access to NemoDictate, then pick this again", seconds: 5)
-            return
+            TextInserter.requestTrust()   // the system prompt; typing falls back to the clipboard until it is granted
+            statusLine = "Grant Accessibility access to NemoDictate for typing"
         }
         outputMode = mode
     }
@@ -121,6 +119,7 @@ final class DictationModel: ObservableObject {
         t.onLevel = { [weak self] l in self?.level = l }
         t.onError = { [weak self] message in
             guard let self else { return }
+            DebugLog.write("failed: \(message)")
             self.statusLine = message
             self.set(.failed)
             self.transcriber?.stop {}
@@ -289,21 +288,14 @@ final class DictationModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: task)
     }
 
-    /// Show `text` on the pill for a while even in typing mode (where the pill is otherwise hidden).
-    private func notice(_ text: String, seconds: Double) {
-        statusLine = text
-        noticeUntil = Date().addingTimeInterval(seconds)
-        pillVisible = true
-        scheduleHide(after: seconds)
-    }
-
-    /// Typing mode without Accessibility access would silently do nothing; say so and ask again.
+    /// Typing mode without Accessibility access would silently do nothing: ask the system to prompt,
+    /// and leave the reason in the status line (visible in the menu) and the log. No pill in this mode.
     private func warnIfUntrusted() {
         guard outputMode == .type, demo == nil else { return }
         DebugLog.write("typing session · trusted \(TextInserter.isTrusted) · target \(TextInserter.frontmostAppName)")
         guard !TextInserter.isTrusted else { return }
         TextInserter.requestTrust()
-        notice("Accessibility access is off for this build of NemoDictate · re-add it under Privacy & Security → Accessibility", seconds: 8)
+        statusLine = "Accessibility access is off for NemoDictate · Privacy & Security → Accessibility"
     }
 
     /// When typing straight into the focused field the text itself is the feedback, so the pill stays
@@ -311,21 +303,15 @@ final class DictationModel: ObservableObject {
     private var typingMode: Bool { demo == "caret" || (demo != "pill" && outputMode == .type) }
 
     private func updateOverlays() {
+        // typing mode never shows the pill: the text arriving in the field, the caret glow and the
+        // menu-bar icon are the feedback
+        pillVisible = !typingMode && state != .idle
         switch state {
-        case .idle:
-            pillVisible = false
-            caretEffectVisible = false
-        case .failed:
-            pillVisible = true
+        case .idle, .failed, .standby:
             caretEffectVisible = false
         case .loading, .listening, .finishing:
-            pillVisible = !typingMode
             caretEffectVisible = typingMode
-        case .standby:
-            pillVisible = !typingMode
-            caretEffectVisible = false
         case .done:
-            pillVisible = !typingMode
             // the caret glow lingers for a moment, then goes
             if caretEffectVisible {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
@@ -339,7 +325,6 @@ final class DictationModel: ObservableObject {
     private func set(_ s: DictationState) {
         state = s
         updateOverlays()
-        if Date() < noticeUntil { pillVisible = true }
         onStateChange?(s)
     }
 }

@@ -13,8 +13,8 @@ public enum CaretLocator {
     }
 
     /// `primaryHeight` is `NSScreen.screens[0].frame.height`, read on the main thread by the caller.
-    public static func locate(primaryHeight: CGFloat) -> Hit? {
-        guard let focused = focusedElement() else { return nil }
+    public static func locate(primaryHeight: CGFloat, pid: pid_t?) -> Hit? {
+        guard let focused = focusedElement(pid: pid) else { return nil }
         if let (r, how) = caretBounds(focused) {
             return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
         }
@@ -30,10 +30,10 @@ public enum CaretLocator {
     }
 
     /// The hit plus one line saying how it was found, or why not, for the app's log.
-    public static func diagnose(primaryHeight: CGFloat) -> (hit: Hit?, note: String) {
-        guard let el = focusedElement() else { return (nil, "no focused element (AX error \(lastError.rawValue), front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-"))") }
+    public static func diagnose(primaryHeight: CGFloat, pid: pid_t?) -> (hit: Hit?, note: String) {
+        guard let el = focusedElement(pid: pid) else { return (nil, "no focused element (AX error \(lastError.rawValue), pid \(pid.map(String.init) ?? "-"))") }
         let role = "\(string(el, kAXRoleAttribute) ?? "?")/\(string(el, kAXSubroleAttribute) ?? "-")"
-        let hit = locate(primaryHeight: primaryHeight)
+        let hit = locate(primaryHeight: primaryHeight, pid: pid)
         if let hit { return (hit, "\(hit.method) in \(role)") }
         var why = "no caret in \(role)"
         if let r = range(el, kAXSelectedTextRangeAttribute) {
@@ -49,7 +49,22 @@ public enum CaretLocator {
 
     // MARK: - lookup strategies
 
-    private static func focusedElement() -> AXUIElement? {
+    private static var accessibilityRequested = Set<pid_t>()
+
+    private static func focusedElement(pid: pid_t?) -> AXUIElement? {
+        if let pid {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 0.25)
+            if let el = element(app, kAXFocusedUIElementAttribute) { AXUIElementSetMessagingTimeout(el, 0.25); return el }
+            // Chromium and Electron apps keep their accessibility tree switched off until an assistive
+            // client announces itself; this attribute is the documented way to ask for it. The tree comes
+            // up a moment later, so the next poll usually gets the element.
+            if !accessibilityRequested.contains(pid) {
+                accessibilityRequested.insert(pid)
+                AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+                if let el = element(app, kAXFocusedUIElementAttribute) { AXUIElementSetMessagingTimeout(el, 0.25); return el }
+            }
+        }
         let system = AXUIElementCreateSystemWide()
         AXUIElementSetMessagingTimeout(system, 0.25)
         guard let el = element(system, kAXFocusedUIElementAttribute) else { return nil }

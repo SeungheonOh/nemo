@@ -22,11 +22,12 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let listening = model.state == .listening
         let standby = model.state == .standby
         let busy = model.state == .loading || model.state == .finishing
-        let name = listening ? "mic.fill" : standby ? "ear" : (busy ? "mic.badge.xmark" : "mic")
+        let failed = model.state == .failed
+        let name = listening ? "mic.fill" : standby ? "ear" : failed ? "exclamationmark.triangle" : (busy ? "mic.badge.xmark" : "mic")
         let image = NSImage(systemSymbolName: name, accessibilityDescription: "NemoDictate")
-        image?.isTemplate = !listening
+        image?.isTemplate = !listening && !failed
         item.button?.image = image
-        item.button?.contentTintColor = listening ? .systemRed : (standby ? .systemTeal : nil)
+        item.button?.contentTintColor = listening ? .systemRed : standby ? .systemTeal : failed ? .systemOrange : nil
     }
 
     private func buildMenu() -> NSMenu {
@@ -133,6 +134,15 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        // the status line lives here too, since typing mode shows no pill
+        if menu.item(withTag: 9) == nil {
+            let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+            status.tag = 9
+            status.isEnabled = false
+            menu.insertItem(status, at: 0)
+            menu.insertItem(.separator(), at: 1)
+        }
+        menu.item(withTag: 9)?.title = model.statusLine.isEmpty ? "Idle" : model.statusLine
         if let mic = menu.item(withTag: 3)?.submenu { rebuildMicrophoneMenu(mic) }
         if let toggle = menu.item(withTag: 1) {
             switch model.state {
