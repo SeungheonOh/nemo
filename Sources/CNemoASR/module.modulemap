@@ -1,0 +1,4 @@
+module CNemoASR [system] {
+    header "shim.h"
+    export *
+}

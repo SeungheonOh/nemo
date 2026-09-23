@@ -1,0 +1,32 @@
+// swift-tools-version:5.9
+import PackageDescription
+
+// The speech recogniser is the C + Metal runtime in ../nemoasr-c, built as a static library
+// (`make -C ../nemoasr-c lib`). Scripts/bundle.sh does that and assembles the .app.
+let nemo = "\(Context.packageDirectory)/../nemoasr-c"
+let link: [LinkerSetting] = [
+    .unsafeFlags(["-L\(nemo)/build"]),
+    .linkedLibrary("nemoasr"),
+    .linkedFramework("Metal"),
+    .linkedFramework("Foundation"),
+]
+
+let package = Package(
+    name: "NemoDictate",
+    platforms: [.macOS(.v14)],
+    targets: [
+        .systemLibrary(name: "CNemoASR", path: "Sources/CNemoASR"),
+        .executableTarget(
+            name: "NemoDictate",
+            dependencies: ["CNemoASR"],
+            path: "Sources/NemoDictate",
+            linkerSettings: link + [.linkedFramework("AppKit"), .linkedFramework("SwiftUI"), .linkedFramework("AVFoundation"), .linkedFramework("Carbon")]
+        ),
+        .executableTarget(
+            name: "nemo-feed",
+            dependencies: ["CNemoASR"],
+            path: "Sources/nemo-feed",
+            linkerSettings: link + [.linkedFramework("AVFoundation")]
+        ),
+    ]
+)
