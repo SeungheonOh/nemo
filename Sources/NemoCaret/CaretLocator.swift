@@ -32,7 +32,10 @@ public enum CaretLocator {
     /// The hit plus one line saying how it was found, or why not, for the app's log.
     public static func diagnose(primaryHeight: CGFloat, pid: pid_t?) -> (hit: Hit?, note: String) {
         guard let el = focusedElement(pid: pid) else { return (nil, "no focused element (AX error \(lastError.rawValue), pid \(pid.map(String.init) ?? "-"))") }
-        let role = "\(string(el, kAXRoleAttribute) ?? "?")/\(string(el, kAXSubroleAttribute) ?? "-")"
+        var role = "\(string(el, kAXRoleAttribute) ?? "?")/\(string(el, kAXSubroleAttribute) ?? "-")"
+        // web content: which DOM element this is
+        if let id = string(el, "AXDOMIdentifier"), !id.isEmpty { role += " #\(id)" }
+        if let cls = raw(el, "AXDOMClassList") as? [String], !cls.isEmpty { role += " .\(cls.prefix(3).joined(separator: "."))" }
         let hit = locate(primaryHeight: primaryHeight, pid: pid)
         if let hit { return (hit, "\(hit.method) in \(role)") }
         var why = "no caret in \(role)"

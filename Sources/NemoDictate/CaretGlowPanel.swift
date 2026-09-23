@@ -20,7 +20,7 @@ final class CaretGlowPanel {
     private var placed = false
     private var shown = false
     private let queue = DispatchQueue(label: "dev.nemo.caret-locator", qos: .userInteractive)
-    private let fixedRect: CGRect?   // demo mode: no tracking, a fixed spot on screen
+    private var fixedRect: CGRect?   // demo mode: no tracking, a spot on screen that advances per chunk
     private var lastNote = ""
     private var lastLogged = (rect: CGRect.zero, at: Date.distantPast)
     private var lastPrecise = Date.distantPast   // when the caret itself (not a fallback) was last seen
@@ -53,6 +53,7 @@ final class CaretGlowPanel {
     /// Called right after text was typed: the caret has just moved; the app needs a moment to lay out.
     func nudge() {
         guard shown else { return }
+        if fixedRect != nil { fixedRect!.origin.x += 9 }
         poll()
         for ms in [40, 120, 300] {
             DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(ms)) { [weak self] in self?.poll() }
@@ -158,11 +159,8 @@ final class CaretGlowPanel {
             panel.orderFrontRegardless()
             fade(to: 1, duration: 0.2, thenOrderOut: false)
         } else if abs(panel.frame.origin.x - origin.x) > 0.5 || abs(panel.frame.origin.y - origin.y) > 0.5 {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.07
-                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                panel.animator().setFrameOrigin(origin)
-            }
+            // NSWindow's animator proxy silently drops setFrameOrigin; move the window directly
+            panel.setFrame(NSRect(origin: origin, size: panel.frame.size), display: true)
             if panel.alphaValue < 1 { fade(to: 1, duration: 0.2, thenOrderOut: false) }
         }
     }
