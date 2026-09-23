@@ -20,6 +20,21 @@ final class Transcriber {
     private var generation = 0          // queue-confined: bumped by every reset
     private var nextGeneration = 0      // main-confined: handed out by reconfigure()
 
+    /// A model shipped inside the app (Contents/Resources/model) wins over the Hugging Face cache.
+    static func modelDirectory() -> String? {
+        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("model", isDirectory: true),
+           FileManager.default.fileExists(atPath: bundled.appendingPathComponent("model.safetensors").path) {
+            return bundled.path
+        }
+        var dir = [CChar](repeating: 0, count: 1200)
+        return nemoasr_default_model_dir(&dir, dir.count) == 0 ? String(cString: dir) : nil
+    }
+
+    static var modelSource: String {
+        guard let dir = modelDirectory() else { return "not found" }
+        return dir.hasPrefix(Bundle.main.bundlePath) ? "bundled with the app" : "Hugging Face cache"
+    }
+
     /// `deviceUID` nil means the system default input.
     func start(language: String, latencyMs: Int, deviceUID: String?) {
         AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
@@ -53,12 +68,12 @@ final class Transcriber {
         let rate = Int32(format.sampleRate.rounded())
         guard rate > 0 else { report("No audio input device."); return }
         var err = [CChar](repeating: 0, count: 512)
-        var dir = [CChar](repeating: 0, count: 1200)
-        guard nemoasr_default_model_dir(&dir, dir.count) == 0 else {
-            report("Model not found in the Hugging Face cache. Run the Python project once to download mlx-community/nemotron-3.5-asr-streaming-0.6b.")
+        guard let dir = Transcriber.modelDirectory() else {
+            report("Model not found: neither inside the app nor in the Hugging Face cache (mlx-community/nemotron-3.5-asr-streaming-0.6b).")
             return
         }
-        guard let h = nemoasr_open(String(cString: dir), language, Int32(latencyMs), rate, &err, err.count) else {
+        DebugLog.write("model from \(dir)")
+        guard let h = nemoasr_open(dir, language, Int32(latencyMs), rate, &err, err.count) else {
             report("Could not load the model: \(String(cString: err))")
             return
         }

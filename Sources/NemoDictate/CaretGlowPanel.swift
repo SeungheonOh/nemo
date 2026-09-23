@@ -5,6 +5,7 @@ import SwiftUI
 
 /// Per-frame inputs for the caret effect that come from tracking rather than from the model.
 final class CaretGeometry: ObservableObject {
+    @Published var active = false             // the view exists only while the panel is shown or fading out
     @Published var caretHeight: CGFloat = 18
     @Published var velocity = CGVector.zero   // points per second the glow is gliding at (AppKit axes, +y up)
     @Published var spawn = 0                  // bumps whenever the glow (re)appears, for the entrance animation
@@ -52,7 +53,9 @@ final class CaretGlowPanel {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         panel.isReleasedWhenClosed = false
         panel.alphaValue = 0
-        let hosting = NSHostingView(rootView: CaretGlowView(model: model, geometry: geometry))
+        // the animated view is torn down while the panel is hidden: an invisible repeat-forever
+        // animation otherwise keeps the main thread busy at display rate all through standby
+        let hosting = NSHostingView(rootView: CaretGlowRoot(model: model, geometry: geometry))
         hosting.sizingOptions = []
         panel.contentView = hosting
         fixedRect = ProcessInfo.processInfo.environment["NEMO_DEMO"] == "caret" ? CGRect(x: 1100, y: 491, width: 2, height: 18) : nil
@@ -85,6 +88,7 @@ final class CaretGlowPanel {
         lastPrecise = .distantPast
         lockedElement = nil
         releaseTask?.cancel()
+        geometry.active = true
         DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
         observe(NSWorkspace.shared.frontmostApplication?.processIdentifier)
         poll()
@@ -102,6 +106,10 @@ final class CaretGlowPanel {
         stopMotion()
         unobserve()
         fade(to: 0, duration: 0.3, thenOrderOut: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, !self.shown else { return }
+            self.geometry.active = false
+        }
         // give browsers their normal behaviour back once dictation has been quiet for a while
         let task = DispatchWorkItem { CaretLocator.releaseWebContent() }
         releaseTask = task
@@ -278,6 +286,18 @@ final class CaretGlowPanel {
         }, completionHandler: { [panel] in
             if thenOrderOut, panel.alphaValue == 0 { panel.orderOut(nil) }
         })
+    }
+}
+
+struct CaretGlowRoot: View {
+    @ObservedObject var model: DictationModel
+    @ObservedObject var geometry: CaretGeometry
+    var body: some View {
+        if geometry.active {
+            CaretGlowView(model: model, geometry: geometry)
+        } else {
+            Color.clear.frame(width: CaretGlowPanel.size, height: CaretGlowPanel.size)
+        }
     }
 }
 

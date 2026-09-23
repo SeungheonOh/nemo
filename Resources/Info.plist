@@ -8,6 +8,8 @@
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundleName</key><string>NemoDictate</string>
     <key>CFBundleDisplayName</key><string>NemoDictate</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>NSHumanReadableCopyright</key><string>Speech recognition runs on this Mac. Model: NVIDIA Nemotron 3.5 ASR Streaming 0.6B.</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1</string>
     <key>CFBundleVersion</key><string>1</string>
