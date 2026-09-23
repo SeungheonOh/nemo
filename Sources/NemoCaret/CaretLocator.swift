@@ -9,22 +9,35 @@ public enum CaretLocator {
         public let rect: CGRect      // AppKit screen coordinates (origin bottom-left of the primary display)
         public let precise: Bool
         public let method: String
-        public init(rect: CGRect, precise: Bool, method: String) { self.rect = rect; self.precise = precise; self.method = method }
+        public let element: AXUIElement?   // where the caret was found; pass back as `prefer` to keep tracking it
+        public init(rect: CGRect, precise: Bool, method: String, element: AXUIElement? = nil) {
+            self.rect = rect; self.precise = precise; self.method = method; self.element = element
+        }
     }
 
     /// `primaryHeight` is `NSScreen.screens[0].frame.height`, read on the main thread by the caller.
-    public static func locate(primaryHeight: CGFloat, pid: pid_t?) -> Hit? {
-        guard var focused = focusedElement(pid: pid) else { return nil }
+    /// `prefer` is the element a caret was last found in: apps with several editable widgets (an
+    /// editor next to an embedded terminal) sometimes report the other one as focused although
+    /// typing still lands in the first, so its report only wins if it can show a caret of its own.
+    public static func locate(primaryHeight: CGFloat, pid: pid_t?, prefer: AXUIElement? = nil) -> Hit? {
+        let focusedNow = focusedElement(pid: pid)
+        if let prefer, focusedNow == nil || !CFEqual(prefer, focusedNow!) {
+            let focusedIsPrecise = focusedNow.flatMap { caretBounds($0) } != nil
+            if !focusedIsPrecise, let (r, how) = caretBounds(prefer) {
+                return Hit(rect: flip(r, primaryHeight), precise: true, method: how + " (kept element)", element: prefer)
+            }
+        }
+        guard var focused = focusedNow else { return nil }
         if let (r, how) = caretBounds(focused) {
             learnInset(of: focused, pid: pid)
-            return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
+            return Hit(rect: flip(r, primaryHeight), precise: true, method: how, element: focused)
         }
         // focus sits on a container (a browser's web view with its tree still off): wake it and look again
         if let pid, !isTextRole(string(focused, kAXRoleAttribute)), wakeWebContent(pid: pid),
            let again = focusedElement(pid: pid) {
             focused = again
             if let (r, how) = caretBounds(focused) {
-                return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
+                return Hit(rect: flip(r, primaryHeight), precise: true, method: how, element: focused)
             }
         }
         if let pid, (raw(focused, "AXDOMClassList") as? [String])?.contains("OmniboxViewViews") == true, wakeWebContent(pid: pid) {
@@ -39,21 +52,22 @@ public enum CaretLocator {
             // Bigger elements are skipped: a glow in the corner of a page or document is not on the caret.
             let f = flip(CGRect(origin: pos, size: size), primaryHeight)
             let caretH = min(18, f.height - 6)
-            let inset = fieldKey(focused, pid: pid).flatMap { learnedInsets[$0] } ?? 12
+            // a caret-sized helper field (terminal emulators, code editors) sits on the caret itself
+            let inset = size.width < 40 ? 0 : (fieldKey(focused, pid: pid).flatMap { learnedInsets[$0] } ?? 12)
             return Hit(rect: CGRect(x: f.minX + inset, y: f.midY - caretH / 2, width: 2, height: caretH), precise: false,
-                       method: "field frame, inset \(Int(inset))")
+                       method: "field frame, inset \(Int(inset))", element: focused)
         }
         return nil
     }
 
     /// The hit plus one line saying how it was found, or why not, for the app's log.
-    public static func diagnose(primaryHeight: CGFloat, pid: pid_t?) -> (hit: Hit?, note: String) {
-        guard let el = focusedElement(pid: pid) else { return (nil, "no focused element (AX error \(lastError.rawValue), pid \(pid.map(String.init) ?? "-"))") }
+    public static func diagnose(primaryHeight: CGFloat, pid: pid_t?, prefer: AXUIElement? = nil) -> (hit: Hit?, note: String) {
+        let hit = locate(primaryHeight: primaryHeight, pid: pid, prefer: prefer)
+        guard let el = hit?.element ?? focusedElement(pid: pid) else { return (nil, "no focused element (AX error \(lastError.rawValue), pid \(pid.map(String.init) ?? "-"))") }
         var role = "\(string(el, kAXRoleAttribute) ?? "?")/\(string(el, kAXSubroleAttribute) ?? "-")"
         // web content: which DOM element this is
         if let id = string(el, "AXDOMIdentifier"), !id.isEmpty { role += " #\(id)" }
         if let cls = raw(el, "AXDOMClassList") as? [String], !cls.isEmpty { role += " .\(cls.prefix(3).joined(separator: "."))" }
-        let hit = locate(primaryHeight: primaryHeight, pid: pid)
         if let hit { return (hit, "\(hit.method) in \(role)") }
         var why = "no caret in \(role)"
         if let r = range(el, kAXSelectedTextRangeAttribute) {

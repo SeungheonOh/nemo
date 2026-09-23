@@ -37,6 +37,7 @@ final class CaretGlowPanel {
     private var releaseTask: DispatchWorkItem?
     private var moveGeneration = 0
     private var demoTicks = 0
+    private var lockedElement: AXUIElement?   // the element a caret was last found in this session
 
     init(model: DictationModel) {
         let s = CaretGlowPanel.size
@@ -82,6 +83,7 @@ final class CaretGlowPanel {
         placed = false
         lastNote = ""
         lastPrecise = .distantPast
+        lockedElement = nil
         releaseTask?.cancel()
         DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
         observe(NSWorkspace.shared.frontmostApplication?.processIdentifier)
@@ -147,8 +149,9 @@ final class CaretGlowPanel {
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         observe(pid)
+        let prefer = lockedElement
         queue.async { [weak self] in
-            let (hit, note) = CaretLocator.diagnose(primaryHeight: primaryHeight, pid: pid)
+            let (hit, note) = CaretLocator.diagnose(primaryHeight: primaryHeight, pid: pid, prefer: prefer)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.inFlight = false
@@ -161,6 +164,7 @@ final class CaretGlowPanel {
                 }
                 if let hit, hit.precise {
                     self.lastPrecise = Date()
+                    self.lockedElement = hit.element
                     self.place(hit)
                 } else if Date().timeIntervalSince(self.lastPrecise) < 2 {
                     // the editor is mid-update (it happens while keystrokes land): stay where the caret was
