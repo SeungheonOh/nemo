@@ -14,9 +14,17 @@ public enum CaretLocator {
 
     /// `primaryHeight` is `NSScreen.screens[0].frame.height`, read on the main thread by the caller.
     public static func locate(primaryHeight: CGFloat, pid: pid_t?) -> Hit? {
-        guard let focused = focusedElement(pid: pid) else { return nil }
+        guard var focused = focusedElement(pid: pid) else { return nil }
         if let (r, how) = caretBounds(focused) {
             return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
+        }
+        // focus sits on a container (a browser's web view with its tree still off): wake it and look again
+        if let pid, !isTextRole(string(focused, kAXRoleAttribute)), wakeWebContent(pid: pid),
+           let again = focusedElement(pid: pid) {
+            focused = again
+            if let (r, how) = caretBounds(focused) {
+                return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
+            }
         }
         if let pos = point(focused, kAXPositionAttribute), let size = self.size(focused, kAXSizeAttribute),
            size.width > 0, size.height > 0, size.height < 60 {
@@ -58,20 +66,16 @@ public enum CaretLocator {
 
     // MARK: - lookup strategies
 
-    private static var accessibilityRequested = Set<pid_t>()
+    private static var lastWake: [pid_t: Date] = [:]
 
     private static func focusedElement(pid: pid_t?) -> AXUIElement? {
         if let pid {
             let app = AXUIElementCreateApplication(pid)
             AXUIElementSetMessagingTimeout(app, 0.25)
             if let el = element(app, kAXFocusedUIElementAttribute) { AXUIElementSetMessagingTimeout(el, 0.25); return el }
-            // Chromium and Electron apps keep their accessibility tree switched off until an assistive
-            // client announces itself; this attribute is the documented way to ask for it. The tree comes
-            // up a moment later, so the next poll usually gets the element.
-            if !accessibilityRequested.contains(pid) {
-                accessibilityRequested.insert(pid)
-                AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-                if let el = element(app, kAXFocusedUIElementAttribute) { AXUIElementSetMessagingTimeout(el, 0.25); return el }
+            if wakeWebContent(pid: pid), let el = element(app, kAXFocusedUIElementAttribute) {
+                AXUIElementSetMessagingTimeout(el, 0.25)
+                return el
             }
         }
         let system = AXUIElementCreateSystemWide()
@@ -79,6 +83,63 @@ public enum CaretLocator {
         guard let el = element(system, kAXFocusedUIElementAttribute) else { return nil }
         AXUIElementSetMessagingTimeout(el, 0.25)
         return el
+    }
+
+    private static func isTextRole(_ role: String?) -> Bool {
+        guard let role else { return false }
+        return ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXWebArea"].contains(role)
+    }
+
+    /// Browsers and Electron apps keep their web accessibility tree switched off until an assistive
+    /// client shows up. Electron has an attribute for that. Chromium (macOS 14+) turns on its basic
+    /// mode the moment a client asks its web view for its role, so hit-test the window and walk its
+    /// tree asking every element for its role. The tree is built a moment later; the next poll gets it.
+    /// Rate-limited per process. Returns false when it was not this process's turn.
+    @discardableResult
+    private static func wakeWebContent(pid: pid_t) -> Bool {
+        let now = Date()
+        guard now.timeIntervalSince(lastWake[pid] ?? .distantPast) > 3 else { return false }
+        lastWake[pid] = now
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.25)
+        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+
+        guard let window = element(app, kAXFocusedWindowAttribute) ?? element(app, kAXMainWindowAttribute) else { return true }
+        // 1. whatever is under the window's centre, and its ancestors
+        if let pos = point(window, kAXPositionAttribute), let size = self.size(window, kAXSizeAttribute) {
+            var hitRef: AXUIElement?
+            if AXUIElementCopyElementAtPosition(app, Float(pos.x + size.width / 2), Float(pos.y + size.height / 2), &hitRef) == .success, var el = hitRef {
+                for _ in 0..<8 {
+                    _ = string(el, kAXRoleAttribute)
+                    guard let parent = element(el, kAXParentAttribute) else { break }
+                    el = parent
+                }
+            }
+        }
+        // 2. breadth-first over the window, bounded; stop once a web area is visible
+        var queue: [(AXUIElement, Int)] = [(window, 0)]
+        var visited = 0
+        while !queue.isEmpty, visited < 300 {
+            let (el, depth) = queue.removeFirst()
+            visited += 1
+            let role = string(el, kAXRoleAttribute)
+            if role == "AXWebArea" { break }
+            guard depth < 10, let kids = children(el) else { continue }
+            queue.append(contentsOf: kids.map { ($0, depth + 1) })
+        }
+        return true
+    }
+
+    private static func children(_ el: AXUIElement) -> [AXUIElement]? {
+        guard let v = raw(el, kAXChildrenAttribute), CFGetTypeID(v) == CFArrayGetTypeID() else { return nil }
+        let arr = unsafeBitCast(v, to: CFArray.self)
+        var out: [AXUIElement] = []
+        for i in 0..<CFArrayGetCount(arr) {
+            guard let p = CFArrayGetValueAtIndex(arr, i) else { continue }
+            let item = Unmanaged<AnyObject>.fromOpaque(p).takeUnretainedValue()
+            if CFGetTypeID(item) == AXUIElementGetTypeID() { out.append(unsafeBitCast(item, to: AXUIElement.self)) }
+        }
+        return out
     }
 
     /// Bounds of the insertion point. A collapsed selection usually has no bounds of its own, so the
