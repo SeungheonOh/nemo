@@ -19,6 +19,10 @@ final class DictationModel: ObservableObject {
     @Published var latencyMs = UserDefaults.standard.object(forKey: "latencyMs") as? Int ?? 560 {
         didSet { UserDefaults.standard.set(latencyMs, forKey: "latencyMs") }
     }
+    /// CoreAudio device UID of the microphone to use; nil follows the system default.
+    @Published var micUID: String? = UserDefaults.standard.string(forKey: "micUID") {
+        didSet { UserDefaults.standard.set(micUID, forKey: "micUID") }
+    }
 
     var onStateChange: ((DictationState) -> Void)?
     private var transcriber: Transcriber?
@@ -49,10 +53,10 @@ final class DictationModel: ObservableObject {
         set(.loading)
         let t = Transcriber()
         transcriber = t
-        t.onReady = { [weak self] gpu in
+        t.onReady = { [weak self] gpu, mic in
             guard let self, self.state == .loading else { return }
             self.startedAt = Date()
-            self.statusLine = "Listening · \(self.latencyMs) ms · \(Int(t.loadMs)) ms load · \(gpu)"
+            self.statusLine = "Listening · \(mic) · \(self.latencyMs) ms · \(Int(t.loadMs)) ms load · \(gpu)"
             self.set(.listening)
         }
         t.onText = { [weak self] text in
@@ -68,7 +72,7 @@ final class DictationModel: ObservableObject {
             self.transcriber = nil
             self.scheduleHide(after: 6)
         }
-        t.start(language: language, latencyMs: latencyMs)
+        t.start(language: language, latencyMs: latencyMs, deviceUID: micUID)
     }
 
     func stop() {

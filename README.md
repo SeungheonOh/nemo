@@ -15,7 +15,7 @@ open build/NemoDictate.app
 
 The first start asks for microphone access. The ASR model must be present in the Hugging Face cache (`~/.cache/huggingface/hub/models--mlx-community--nemotron-3.5-asr-streaming-0.6b`); running the Python project in `../nemoasr` once downloads it.
 
-Menu bar: Start/Stop, Copy Last Transcript, Language (auto-detect, English, Korean, Japanese, …), Chunk latency (80 / 320 / 560 / 1120 ms), Quit. Language and latency persist.
+Menu bar: Start/Stop, Copy Last Transcript, Language (auto-detect, English, Korean, Japanese, …), Chunk latency (80 / 320 / 560 / 1120 ms), Microphone (System Default or any connected input; the list is refreshed every time the menu opens), Quit. Language, latency and microphone persist; the microphone is remembered by its device UID, and if it is not connected the app falls back to the system default and says so in the status line.
 
 ## How it fits together
 
@@ -39,11 +39,12 @@ flowchart LR
 | `IndicatorPanel.swift` / `IndicatorView.swift` | the floating pill: borderless non-activating panel on all Spaces, SwiftUI content with pulsing state dot, waveform bars, streaming text, status |
 | `StatusBarController.swift` | `NSStatusItem`, menu, checkmarks for language and latency |
 | `HotKey.swift` | system-wide hotkey through `RegisterEventHotKey` (no accessibility permission needed) |
+| `Sources/NemoAudio/AudioInputDevice.swift` | CoreAudio input device enumeration (name, UID, rate, channels), shared with `nemo-feed --list-mics` |
 | `Sources/CNemoASR` | module map exposing `../nemoasr-c/src/nemoasr.h` to Swift |
 | `Sources/nemo-feed` | headless check: feeds an audio file through the same bridge and prints the transcript |
 | `Scripts/bundle.sh`, `Resources/Info.plist` | assembles the `.app` (`LSUIElement`, microphone usage string), ad-hoc signed |
 
-`swift run nemo-feed ../nemoasr-c/ref/fox48k.wav` transcribes a file through the exact Swift-to-C path the app uses, without a microphone.
+`swift run nemo-feed ../nemoasr-c/ref/fox48k.wav` transcribes a file through the exact Swift-to-C path the app uses, without a microphone. `swift run nemo-feed --list-mics` prints the input devices the menu will show.
 
 ## Notes
 

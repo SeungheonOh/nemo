@@ -1,11 +1,13 @@
 import AVFoundation
+import AudioToolbox
 import CNemoASR
 import Foundation
+import NemoAudio
 
 /// Owns the microphone and the C speech recogniser. All recogniser calls happen on one serial
 /// queue; callbacks are delivered on the main queue.
 final class Transcriber {
-    var onReady: ((String) -> Void)?      // GPU name
+    var onReady: ((String, String) -> Void)?   // GPU name, microphone name
     var onText: ((String) -> Void)?       // newly decoded text (append)
     var onLevel: ((Float) -> Void)?       // 0...1 input level
     var onError: ((String) -> Void)?
@@ -16,18 +18,35 @@ final class Transcriber {
     private var running = false
     private(set) var loadMs: Double = 0
 
-    func start(language: String, latencyMs: Int) {
+    /// `deviceUID` nil means the system default input.
+    func start(language: String, latencyMs: Int, deviceUID: String?) {
         AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
             guard let self else { return }
             guard granted else {
                 DispatchQueue.main.async { self.onError?("Microphone access denied. Allow NemoDictate in System Settings > Privacy & Security > Microphone.") }
                 return
             }
-            self.queue.async { self.open(language: language, latencyMs: latencyMs) }
+            self.queue.async { self.open(language: language, latencyMs: latencyMs, deviceUID: deviceUID) }
         }
     }
 
-    private func open(language: String, latencyMs: Int) {
+    /// Route the engine's input unit to a specific CoreAudio device (must happen before start).
+    private func selectDevice(_ device: AudioInputDevice) -> Bool {
+        guard let unit = engine.inputNode.audioUnit else { return false }
+        var id = device.id
+        let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+        return status == noErr
+    }
+
+    private func open(language: String, latencyMs: Int, deviceUID: String?) {
+        var micName = AudioInputDevice.systemDefault()?.name ?? "default input"
+        if let uid = deviceUID {
+            if let device = AudioInputDevice.find(uid: uid) {
+                if selectDevice(device) { micName = device.name } else { micName = "\(device.name) (could not select, using default)" }
+            } else {
+                micName = "default input (chosen microphone not connected)"
+            }
+        }
         let format = engine.inputNode.inputFormat(forBus: 0)
         let rate = Int32(format.sampleRate.rounded())
         guard rate > 0 else { report("No audio input device."); return }
@@ -75,7 +94,7 @@ final class Transcriber {
             return
         }
         running = true
-        DispatchQueue.main.async { self.onReady?(gpu) }
+        DispatchQueue.main.async { self.onReady?(gpu, micName) }
     }
 
     private func feed(_ samples: [Float], final: Bool) {

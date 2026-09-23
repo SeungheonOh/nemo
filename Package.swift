@@ -16,15 +16,16 @@ let package = Package(
     platforms: [.macOS(.v14)],
     targets: [
         .systemLibrary(name: "CNemoASR", path: "Sources/CNemoASR"),
+        .target(name: "NemoAudio", path: "Sources/NemoAudio", linkerSettings: [.linkedFramework("CoreAudio")]),
         .executableTarget(
             name: "NemoDictate",
-            dependencies: ["CNemoASR"],
+            dependencies: ["CNemoASR", "NemoAudio"],
             path: "Sources/NemoDictate",
             linkerSettings: link + [.linkedFramework("AppKit"), .linkedFramework("SwiftUI"), .linkedFramework("AVFoundation"), .linkedFramework("Carbon")]
         ),
         .executableTarget(
             name: "nemo-feed",
-            dependencies: ["CNemoASR"],
+            dependencies: ["CNemoASR", "NemoAudio"],
             path: "Sources/nemo-feed",
             linkerSettings: link + [.linkedFramework("AVFoundation")]
         ),

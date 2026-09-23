@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import NemoAudio
 
 /// Menu bar item: shows whether we are listening and holds the menu.
 final class StatusBarController: NSObject, NSMenuDelegate {
@@ -61,20 +62,51 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let lat = NSMenuItem(title: "Chunk latency", action: nil, keyEquivalent: "")
         lat.submenu = latMenu
         menu.addItem(lat)
+
+        let mic = NSMenuItem(title: "Microphone", action: nil, keyEquivalent: "")
+        mic.submenu = NSMenu()
+        mic.tag = 3
+        menu.addItem(mic)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit NemoDictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
         return menu
     }
 
+    /// The device list is rebuilt every time the menu opens, so plugging a mic in shows up immediately.
+    private func rebuildMicrophoneMenu(_ sub: NSMenu) {
+        sub.removeAllItems()
+        let dflt = AudioInputDevice.systemDefault()
+        let auto = NSMenuItem(title: "System Default" + (dflt.map { " (\($0.name))" } ?? ""), action: #selector(pickMic(_:)), keyEquivalent: "")
+        auto.target = self
+        auto.state = model.micUID == nil ? .on : .off
+        sub.addItem(auto)
+        sub.addItem(.separator())
+        var seen = false
+        for device in AudioInputDevice.inputs() {
+            let mi = NSMenuItem(title: "\(device.name)  ·  \(Int(device.sampleRate)) Hz, \(device.inputChannels) ch", action: #selector(pickMic(_:)), keyEquivalent: "")
+            mi.representedObject = device.uid
+            mi.target = self
+            mi.state = device.uid == model.micUID ? .on : .off
+            seen = seen || mi.state == .on
+            sub.addItem(mi)
+        }
+        if let uid = model.micUID, !seen {
+            let missing = NSMenuItem(title: "Chosen microphone not connected (\(uid))", action: nil, keyEquivalent: "")
+            missing.isEnabled = false
+            sub.addItem(missing)
+        }
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if let mic = menu.item(withTag: 3)?.submenu { rebuildMicrophoneMenu(mic) }
         if let toggle = menu.item(withTag: 1) {
             toggle.title = model.state == .listening ? "Stop Listening" : "Start Listening"
             toggle.isEnabled = !(model.state == .loading || model.state == .finishing)
         }
         menu.item(withTag: 2)?.isEnabled = !model.lastTranscript.isEmpty
-        for sub in menu.items.compactMap(\.submenu) {
-            for mi in sub.items {
+        for item in menu.items where item.tag != 3 {
+            for mi in item.submenu?.items ?? [] {
                 if let code = mi.representedObject as? String { mi.state = code == model.language ? .on : .off }
                 if let ms = mi.representedObject as? Int { mi.state = ms == model.latencyMs ? .on : .off }
             }
@@ -85,4 +117,5 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func copyLast(_ sender: Any?) { model.copyLast() }
     @objc private func pickLanguage(_ sender: NSMenuItem) { if let c = sender.representedObject as? String { model.language = c } }
     @objc private func pickLatency(_ sender: NSMenuItem) { if let ms = sender.representedObject as? Int { model.latencyMs = ms } }
+    @objc private func pickMic(_ sender: NSMenuItem) { model.micUID = sender.representedObject as? String }
 }

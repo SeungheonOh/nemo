@@ -2,9 +2,17 @@
 import AVFoundation
 import CNemoASR
 import Foundation
+import NemoAudio
 
 let args = CommandLine.arguments
-guard args.count >= 2 else { fputs("usage: nemo-feed file.wav [language] [latency_ms]\n", stderr); exit(2) }
+if args.count >= 2, args[1] == "--list-mics" {
+    let dflt = AudioInputDevice.systemDefault()
+    for d in AudioInputDevice.inputs() {
+        print("\(d.id == dflt?.id ? ">" : " ") \(d.name)  [\(d.uid)]  \(Int(d.sampleRate)) Hz, \(d.inputChannels) ch")
+    }
+    exit(0)
+}
+guard args.count >= 2 else { fputs("usage: nemo-feed file.wav [language] [latency_ms] | --list-mics\n", stderr); exit(2) }
 let language = args.count > 2 ? args[2] : "en-US"
 let latency = args.count > 3 ? Int32(args[3]) ?? 560 : 560
 
