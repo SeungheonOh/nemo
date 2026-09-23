@@ -24,7 +24,7 @@ Menu bar: Start/Stop, Copy Last Transcript, Language (auto-detect, English, Kore
 
 macOS ties that permission to the app's code signature. `Scripts/bundle.sh` therefore signs with your Apple Development (or Developer ID) certificate when `security find-identity` shows one, which keeps the permission across rebuilds; with only an ad-hoc signature the permission is lost on every build and has to be re-added. `CODESIGN_ID` overrides the choice.
 
-The caret glow finds the insertion point through the Accessibility API of the focused app: the bounds of the selected text range (measuring the character after or before a collapsed caret), then WebKit/Chromium text-marker ranges, then the focused element's frame as a rough fallback. If none of those answer, nothing is shown rather than guessing. `swift run nemo-caret`, from a terminal that has Accessibility access, prints what the lookup sees in whatever app is focused, twice a second; use it when the glow does not appear or sits in the wrong place in some app.
+The caret glow finds the insertion point through the Accessibility API of the focused app: the bounds of the selected text range (the empty range itself, or the character after or before the caret), then WebKit/Chromium text-marker ranges, then, for a small single-line field only, its left edge. If none of those answer, nothing is shown rather than guessing. What the lookup sees, and whether the app is trusted, is appended to `~/Library/Logs/NemoDictate.log` whenever a typing session starts or the answer changes, for apps that misbehave.
 
 ### Wake word
 
@@ -54,7 +54,8 @@ flowchart LR
 | `TextInserter.swift` | Accessibility check and prompt, typing text into the focused app through `CGEvent` keyboard events |
 | `CaretGlowPanel.swift` | click-through panel that follows the insertion point in typing mode; the glow and the square logo |
 | `Palette.swift` | per-state colour triples for the glow, rim, waveform and caret effect |
-| `Sources/NemoCaret/CaretLocator.swift` | insertion-point lookup through the Accessibility API, shared with `nemo-caret` |
+| `Sources/NemoCaret/CaretLocator.swift` | insertion-point lookup through the Accessibility API |
+| `DebugLog.swift` | short lines to `~/Library/Logs/NemoDictate.log` about trust and caret lookups |
 | `Sources/NemoAudio/WakeWordDetector.swift` | trigger-phrase matching on streaming words, per-word and run-together edit distance |
 | `Transcriber.swift` | microphone permission, `AVAudioEngine` input tap, mono mix and level, calls into the C library on a serial queue |
 | `IndicatorPanel.swift` / `IndicatorView.swift` | the floating pill: borderless non-activating panel on all Spaces, oversized so the SwiftUI-drawn shadow and animated underglow never clip; pulsing state dot, gradient waveform, streaming text with a blinking caret, status |

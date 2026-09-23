@@ -299,7 +299,9 @@ final class DictationModel: ObservableObject {
 
     /// Typing mode without Accessibility access would silently do nothing; say so and ask again.
     private func warnIfUntrusted() {
-        guard outputMode == .type, demo == nil, !TextInserter.isTrusted else { return }
+        guard outputMode == .type, demo == nil else { return }
+        DebugLog.write("typing session · trusted \(TextInserter.isTrusted) · target \(TextInserter.frontmostAppName)")
+        guard !TextInserter.isTrusted else { return }
         TextInserter.requestTrust()
         notice("Accessibility access is off for this build of NemoDictate · re-add it under Privacy & Security → Accessibility", seconds: 8)
     }

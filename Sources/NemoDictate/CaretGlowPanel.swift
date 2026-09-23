@@ -1,4 +1,5 @@
 import AppKit
+import ApplicationServices
 import NemoCaret
 import SwiftUI
 
@@ -20,6 +21,7 @@ final class CaretGlowPanel {
     private var shown = false
     private let queue = DispatchQueue(label: "dev.nemo.caret-locator", qos: .userInteractive)
     private let fixedRect: CGRect?   // demo mode: no tracking, a fixed spot on screen
+    private var lastNote = ""
 
     init(model: DictationModel) {
         let s = CaretGlowPanel.size
@@ -51,6 +53,8 @@ final class CaretGlowPanel {
         guard !shown else { return }
         shown = true
         placed = false
+        lastNote = ""
+        DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
         poll()
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.poll() }
@@ -73,11 +77,15 @@ final class CaretGlowPanel {
         inFlight = true
         let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
         queue.async { [weak self] in
-            let hit = CaretLocator.locate(primaryHeight: primaryHeight)
+            let (hit, note) = CaretLocator.diagnose(primaryHeight: primaryHeight)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.inFlight = false
                 guard self.shown else { return }
+                if note != self.lastNote {
+                    self.lastNote = note
+                    DebugLog.write(hit.map { "caret \(note) at \(Int($0.rect.minX)),\(Int($0.rect.minY)) h\(Int($0.rect.height))" } ?? "caret \(note)")
+                }
                 if let hit { self.place(hit) } else { self.lost() }
             }
         }

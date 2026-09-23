@@ -24,7 +24,6 @@ let package = Package(
             path: "Sources/NemoDictate",
             linkerSettings: link + [.linkedFramework("AppKit"), .linkedFramework("SwiftUI"), .linkedFramework("AVFoundation"), .linkedFramework("Carbon")]
         ),
-        .executableTarget(name: "nemo-caret", dependencies: ["NemoCaret"], path: "Sources/nemo-caret"),
         .executableTarget(
             name: "nemo-feed",
             dependencies: ["CNemoASR", "NemoAudio"],

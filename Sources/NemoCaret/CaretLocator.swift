@@ -3,7 +3,7 @@ import ApplicationServices
 
 /// Finds where the focused app is about to insert text, through the Accessibility API.
 /// Precise when the app reports bounds for its selection (Cocoa text views, WebKit and Chromium
-/// text fields); otherwise falls back to the focused element's frame. Never guesses from the mouse.
+/// text fields); for a small single-line field that gives no bounds, its left edge. Never guesses.
 public enum CaretLocator {
     public struct Hit {
         public let rect: CGRect      // AppKit screen coordinates (origin bottom-left of the primary display)
@@ -29,24 +29,22 @@ public enum CaretLocator {
         return nil
     }
 
-    /// One multi-line report of everything the lookup sees, for `nemo-caret`.
-    public static func report(primaryHeight: CGFloat) -> String {
-        var out: [String] = []
-        out.append("trusted: \(AXIsProcessTrusted())   front app: \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
-        guard let el = focusedElement() else { return (out + ["focused element: none (AX error \(lastError.rawValue))"]).joined(separator: "\n") }
-        out.append("focused element: role=\(string(el, kAXRoleAttribute) ?? "?") subrole=\(string(el, kAXSubroleAttribute) ?? "-")")
+    /// The hit plus one line saying how it was found, or why not, for the app's log.
+    public static func diagnose(primaryHeight: CGFloat) -> (hit: Hit?, note: String) {
+        guard let el = focusedElement() else { return (nil, "no focused element (AX error \(lastError.rawValue), front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-"))") }
+        let role = "\(string(el, kAXRoleAttribute) ?? "?")/\(string(el, kAXSubroleAttribute) ?? "-")"
+        let hit = locate(primaryHeight: primaryHeight)
+        if let hit { return (hit, "\(hit.method) in \(role)") }
+        var why = "no caret in \(role)"
         if let r = range(el, kAXSelectedTextRangeAttribute) {
-            out.append("selected range: loc=\(r.location) len=\(r.length)")
-            for probe in [r, CFRange(location: r.location, length: 1), CFRange(location: max(0, r.location - 1), length: 1)] {
-                out.append("  bounds for (\(probe.location),\(probe.length)): \(bounds(el, probe).map { "\($0)" } ?? "none (AX error \(lastError.rawValue))")")
-            }
+            why += ", range (\(r.location),\(r.length))"
+            _ = bounds(el, r); why += ", bounds err \(lastError.rawValue)"
         } else {
-            out.append("selected range: none (AX error \(lastError.rawValue))")
+            why += ", no selected range (err \(lastError.rawValue))"
         }
-        out.append("marker range bounds: \(markerBounds(el).map { "\($0)" } ?? "none (AX error \(lastError.rawValue))")")
-        if let p = point(el, kAXPositionAttribute), let s = size(el, kAXSizeAttribute) { out.append("element frame (Quartz): \(CGRect(origin: p, size: s))") }
-        out.append("=> \(locate(primaryHeight: primaryHeight).map { "\($0.method): \($0.rect) precise=\($0.precise)" } ?? "nothing")")
-        return out.joined(separator: "\n")
+        _ = markerBounds(el); why += ", marker err \(lastError.rawValue)"
+        if let sz = size(el, kAXSizeAttribute) { why += ", size \(Int(sz.width))x\(Int(sz.height))" }
+        return (nil, why)
     }
 
     // MARK: - lookup strategies
@@ -68,6 +66,9 @@ public enum CaretLocator {
                 return (CGRect(x: b.maxX, y: b.minY, width: 2, height: b.height), "selection end")   // typing replaces the selection
             }
             if r.length == 0 {
+                if let b = bounds(el, r), b.width < 4 {   // some editors answer for the empty range itself
+                    return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "caret range")
+                }
                 if let b = bounds(el, CFRange(location: r.location, length: 1)) {
                     return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "char after caret")
                 }
