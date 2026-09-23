@@ -26,6 +26,7 @@ final class CaretGlowPanel {
     private var lastPrecise = Date.distantPast   // when the caret itself (not a fallback) was last seen
     private var observer: AXObserver?
     private var observedPID: pid_t = 0
+    private var releaseTask: DispatchWorkItem?
 
     init(model: DictationModel) {
         let s = CaretGlowPanel.size
@@ -94,6 +95,7 @@ final class CaretGlowPanel {
         shown = true
         placed = false
         lastNote = ""
+        releaseTask?.cancel()
         lastPrecise = .distantPast
         DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
         observe(NSWorkspace.shared.frontmostApplication?.processIdentifier)
@@ -111,6 +113,10 @@ final class CaretGlowPanel {
         timer = nil
         unobserve()
         fade(to: 0, duration: 0.3, thenOrderOut: true)
+        // give browsers their normal behaviour back once dictation has been quiet for a while
+        let task = DispatchWorkItem { CaretLocator.releaseWebContent() }
+        releaseTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 600, execute: task)
     }
 
     private func poll() {

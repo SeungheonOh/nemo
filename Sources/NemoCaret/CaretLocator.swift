@@ -26,6 +26,11 @@ public enum CaretLocator {
                 return Hit(rect: flip(r, primaryHeight), precise: true, method: how)
             }
         }
+        if let pid, (raw(focused, "AXDOMClassList") as? [String])?.contains("OmniboxViewViews") == true, wakeWebContent(pid: pid) {
+            // Chrome reports its URL bar as focused while the web tree is still off; the tree is on its
+            // way now, so do not glow on the address bar in the meantime
+            return nil
+        }
         if let pos = point(focused, kAXPositionAttribute), let size = self.size(focused, kAXSizeAttribute),
            size.width > 0, size.height > 0, size.height < 60 {
             // a single-line field that gives no range bounds (usually empty): the caret is at its left edge.
@@ -91,10 +96,11 @@ public enum CaretLocator {
     }
 
     /// Browsers and Electron apps keep their web accessibility tree switched off until an assistive
-    /// client shows up. Electron has an attribute for that. Chromium (macOS 14+) turns on its basic
-    /// mode the moment a client asks its web view for its role, so hit-test the window and walk its
-    /// tree asking every element for its role. The tree is built a moment later; the next poll gets it.
-    /// Rate-limited per process. Returns false when it was not this process's turn.
+    /// client shows up. Electron has its own attribute for that (AXManualAccessibility, immediate).
+    /// Chrome and its forks only listen to the flag VoiceOver sets, AXEnhancedUserInterface, and switch
+    /// their complete mode on two seconds after it is set (chrome_browser_application_mac.mm); the
+    /// role-query shortcut newer Chromium has is behind a flag that is off by default. Rate-limited per
+    /// process; returns false when it was not this process's turn.
     @discardableResult
     private static func wakeWebContent(pid: pid_t) -> Bool {
         let now = Date()
@@ -102,11 +108,14 @@ public enum CaretLocator {
         lastWake[pid] = now
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.25)
-        AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-
-        guard let window = element(app, kAXFocusedWindowAttribute) ?? element(app, kAXMainWindowAttribute) else { return true }
-        // 1. whatever is under the window's centre, and its ancestors
-        if let pos = point(window, kAXPositionAttribute), let size = self.size(window, kAXSizeAttribute) {
+        let electron = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue) == .success
+        if !electron, AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue) == .success {
+            enhancedLock.lock(); enhanced.insert(pid); enhancedLock.unlock()
+        }
+        // newer Chromium (flag-gated) turns basic mode on when the web view is asked for its role;
+        // cheap to try: whatever sits under the window's centre, and its ancestors
+        if let window = element(app, kAXFocusedWindowAttribute) ?? element(app, kAXMainWindowAttribute),
+           let pos = point(window, kAXPositionAttribute), let size = self.size(window, kAXSizeAttribute) {
             var hitRef: AXUIElement?
             if AXUIElementCopyElementAtPosition(app, Float(pos.x + size.width / 2), Float(pos.y + size.height / 2), &hitRef) == .success, var el = hitRef {
                 for _ in 0..<8 {
@@ -116,30 +125,25 @@ public enum CaretLocator {
                 }
             }
         }
-        // 2. breadth-first over the window, bounded; stop once a web area is visible
-        var queue: [(AXUIElement, Int)] = [(window, 0)]
-        var visited = 0
-        while !queue.isEmpty, visited < 300 {
-            let (el, depth) = queue.removeFirst()
-            visited += 1
-            let role = string(el, kAXRoleAttribute)
-            if role == "AXWebArea" { break }
-            guard depth < 10, let kids = children(el) else { continue }
-            queue.append(contentsOf: kids.map { ($0, depth + 1) })
-        }
         return true
     }
 
-    private static func children(_ el: AXUIElement) -> [AXUIElement]? {
-        guard let v = raw(el, kAXChildrenAttribute), CFGetTypeID(v) == CFArrayGetTypeID() else { return nil }
-        let arr = unsafeBitCast(v, to: CFArray.self)
-        var out: [AXUIElement] = []
-        for i in 0..<CFArrayGetCount(arr) {
-            guard let p = CFArrayGetValueAtIndex(arr, i) else { continue }
-            let item = Unmanaged<AnyObject>.fromOpaque(p).takeUnretainedValue()
-            if CFGetTypeID(item) == AXUIElementGetTypeID() { out.append(unsafeBitCast(item, to: AXUIElement.self)) }
+    private static var enhanced = Set<pid_t>()
+    private static let enhancedLock = NSLock()
+
+    /// Chrome treats AXEnhancedUserInterface as "a screen reader is here" and, among other things,
+    /// animates window moves while it is set, which upsets window managers. Clear it when the glow has
+    /// been idle for a while and on quit; Chrome drops the mode two seconds later.
+    public static func releaseWebContent() {
+        enhancedLock.lock()
+        let pids = enhanced
+        enhanced.removeAll()
+        enhancedLock.unlock()
+        for pid in pids where NSRunningApplication(processIdentifier: pid) != nil {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 0.25)
+            AXUIElementSetAttributeValue(app, "AXEnhancedUserInterface" as CFString, kCFBooleanFalse)
         }
-        return out
     }
 
     /// Bounds of the insertion point. A collapsed selection usually has no bounds of its own, so the

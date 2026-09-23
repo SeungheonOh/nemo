@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import Combine
+import NemoCaret
 
 /// Menu-bar-only app: Option+Space (or the menu) starts listening; the model loads on demand
 /// (about 300 ms), a floating indicator shows the live transcript, and stopping copies the text
@@ -39,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        CaretLocator.releaseWebContent()
         if model.isRunning { model.stop() }
     }
 }
