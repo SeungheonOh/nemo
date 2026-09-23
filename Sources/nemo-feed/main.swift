@@ -26,11 +26,14 @@ if args.count >= 2, args[1] == "--wake-test" {
     }
     exit(0)
 }
-guard args.count >= 2 else { fputs("usage: nemo-feed file.wav [language] [latency_ms] | --list-mics | --wake-test [phrase]\n", stderr); exit(2) }
-let language = args.count > 2 ? args[2] : "en-US"
-let latency = args.count > 3 ? Int32(args[3]) ?? 560 : 560
+guard args.count >= 2 else { fputs("usage: nemo-feed file.wav [language] [latency_ms] | --reset-test file.wav | --list-mics | --wake-test [phrase]\n", stderr); exit(2) }
+// --reset-test: first half of the file as an English 320 ms stream, then nemoasr_reset to auto/560 for the rest
+let resetTest = args[1] == "--reset-test"
+let path = resetTest ? (args.count > 2 ? args[2] : "../nemoasr-c/ref/mixed.wav") : args[1]
+let language = resetTest ? "en-US" : (args.count > 2 ? args[2] : "en-US")
+let latency: Int32 = resetTest ? 320 : (args.count > 3 ? Int32(args[3]) ?? 560 : 560)
 
-let file = try AVAudioFile(forReading: URL(fileURLWithPath: args[1]))
+let file = try AVAudioFile(forReading: URL(fileURLWithPath: path))
 let format = file.processingFormat
 let frames = AVAudioFrameCount(file.length)
 let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames)!
@@ -51,7 +54,15 @@ guard let h = nemoasr_open(String(cString: dir), language, latency, Int32(format
 fputs("[swift] ready in \(Int(nemoasr_load_ms(h))) ms on \(String(cString: nemoasr_gpu_name(h))), input \(Int(format.sampleRate)) Hz\n", stderr)
 let block = Int(format.sampleRate) / 10
 var pos = 0
+var didReset = false
 while pos < mono.count {
+    if resetTest, !didReset, pos >= mono.count / 2 {
+        didReset = true
+        let tail = nemoasr_feed(h, nil, 0, 1, &err, err.count)
+        if let tail { print(String(cString: tail), terminator: ""); nemoasr_free(tail) }
+        print("\n[swift] --- nemoasr_reset(auto, 560) ---")
+        if nemoasr_reset(h, "auto", 560, &err, err.count) != 0 { fputs("reset: \(String(cString: err))\n", stderr); exit(1) }
+    }
     let n = min(block, mono.count - pos)
     let final = pos + n >= mono.count
     let text = mono.withUnsafeBufferPointer { nemoasr_feed(h, $0.baseAddress! + pos, n, final ? 1 : 0, &err, err.count) }

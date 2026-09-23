@@ -42,6 +42,7 @@ final class DictationModel: ObservableObject {
     private var hideTask: DispatchWorkItem?
     private var silenceTask: DispatchWorkItem?
     private var wakePendingTask: DispatchWorkItem?
+    private var acceptGeneration = 0    // text from older recogniser streams (before a switch) is ignored
     private var typedCount = 0          // characters of `transcript` already typed into the focused app
 
     static let languages: [(String, String)] = [
@@ -49,6 +50,11 @@ final class DictationModel: ObservableObject {
         ("de-DE", "German"), ("fr-FR", "French"), ("es-ES", "Spanish"), ("zh-CN", "Chinese"),
     ]
     static let latencies = [80, 320, 560, 1120]
+    /// Standby listens in English at a short chunk, whatever the dictation language: the wake word is
+    /// English and a short chunk makes the trigger snappy. Each segment switches to the chosen language
+    /// and latency, and back afterwards, so speech in another language never has to "wear off" first.
+    static let wakeLanguage = "en-US"
+    static let wakeLatencyMs = 320
     static let silenceOptions: [Double] = [1.5, 2.5, 4.0]
 
     init() {
@@ -108,6 +114,7 @@ final class DictationModel: ObservableObject {
         t.onReady = { [weak self] gpu, mic in
             guard let self, self.state == .loading else { return }
             if self.wakeMode {
+                t.prepare(latencyMs: self.latencyMs)   // dictation kernels ready before the first switch
                 self.statusLine = "Say “\(self.wakeWord)” to start · \(mic)"
                 self.set(.standby)
                 self.scheduleHide(after: 2.5)
@@ -116,7 +123,7 @@ final class DictationModel: ObservableObject {
                 self.set(.listening)
             }
         }
-        t.onText = { [weak self] text in self?.handleText(text) }
+        t.onText = { [weak self] text, gen in self?.handleText(text, generation: gen) }
         t.onLevel = { [weak self] l in self?.level = l }
         t.onError = { [weak self] message in
             guard let self else { return }
@@ -127,10 +134,16 @@ final class DictationModel: ObservableObject {
             self.transcriber = nil
             self.scheduleHide(after: 6)
         }
-        t.start(language: language, latencyMs: latencyMs, deviceUID: micUID)
+        acceptGeneration = 0
+        if wakeMode {
+            t.start(language: Self.wakeLanguage, latencyMs: Self.wakeLatencyMs, deviceUID: micUID)
+        } else {
+            t.start(language: language, latencyMs: latencyMs, deviceUID: micUID)
+        }
     }
 
-    private func handleText(_ text: String) {
+    private func handleText(_ text: String, generation: Int) {
+        guard generation >= acceptGeneration else { return }   // decoded before the last stream switch
         switch state {
         case .standby, .done:
             // in wake mode the mic keeps running through the "done" notice, so the phrase can re-trigger right away
@@ -145,7 +158,7 @@ final class DictationModel: ObservableObject {
                     if let after = self.detector.flushPending() { self.beginTranscribing(initial: after) }
                 }
                 wakePendingTask = task
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: task)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: task)
             }
         case .listening:
             if transcript.isEmpty {
@@ -166,6 +179,12 @@ final class DictationModel: ObservableObject {
 
     private func beginTranscribing(initial: String) {
         hideTask?.cancel()
+        wakePendingTask?.cancel()
+        if wakeMode, let t = transcriber {
+            // leave the English wake stream for the dictation language and latency; whatever the wake
+            // stream still had buffered is the wake word's tail, so it is dropped
+            acceptGeneration = t.reconfigure(language: language, latencyMs: latencyMs)
+        }
         transcript = initial.isEmpty ? "" : initial.prefix(1).uppercased() + initial.dropFirst()
         typedCount = 0
         let target = outputMode == .type ? " · typing into \(TextInserter.frontmostAppName)" : ""
@@ -185,16 +204,24 @@ final class DictationModel: ObservableObject {
         statusLine = "Finishing…"
         set(.finishing)
         if wakeMode {
-            // keep the microphone and the model running: just deliver this segment
-            deliverFinal()
-            set(.done)
+            // keep the microphone and the model running: flush this segment's last words, deliver it,
+            // and go back to the English wake stream
             detector.reset()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                guard let self, self.state == .done else { return }
-                self.transcript = ""
-                self.statusLine = "Say “\(self.wakeWord)” to start"
-                self.set(.standby)
-                self.scheduleHide(after: 1.5)
+            acceptGeneration = t.reconfigure(language: Self.wakeLanguage, latencyMs: Self.wakeLatencyMs) { [weak self] tail in
+                guard let self else { return }
+                if !tail.isEmpty {
+                    self.transcript += tail
+                    if self.outputMode == .type { self.deliverLiveText() }
+                }
+                self.deliverFinal()
+                self.set(.done)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                    guard let self, self.state == .done else { return }
+                    self.transcript = ""
+                    self.statusLine = "Say “\(self.wakeWord)” to start"
+                    self.set(.standby)
+                    self.scheduleHide(after: 1.5)
+                }
             }
         } else {
             t.stop { [weak self] in

@@ -6,24 +6,30 @@ import SwiftUI
 /// Per-frame inputs for the caret effect that come from tracking rather than from the model.
 final class CaretGeometry: ObservableObject {
     @Published var caretHeight: CGFloat = 18
+    @Published var speed: CGFloat = 0     // points per second the glow is gliding at
 }
 
 /// A click-through panel that follows the insertion point of the focused app while text is typed
-/// into it. When the caret cannot be located the panel stays invisible rather than guessing.
+/// into it. Position updates come from AX notifications and a slow safety poll; the window glides
+/// to each new position instead of jumping. When the caret cannot be located it stays invisible.
 final class CaretGlowPanel {
     static let size: CGFloat = 120
 
     private let panel: NSPanel
     private let geometry = CaretGeometry()
-    private var timer: Timer?
+    private var timer: Timer?             // safety-net poll
+    private var motion: Timer?            // 60 Hz glide toward `target`
+    private var target = NSPoint.zero
+    private var current = NSPoint.zero
+    private var lastTick = Date()
     private var inFlight = false
     private var placed = false
     private var shown = false
     private let queue = DispatchQueue(label: "dev.nemo.caret-locator", qos: .userInteractive)
-    private var fixedRect: CGRect?   // demo mode: no tracking, a spot on screen that advances per chunk
+    private var fixedRect: CGRect?        // demo mode: no tracking, a spot on screen that advances per chunk
     private var lastNote = ""
     private var lastLogged = (rect: CGRect.zero, at: Date.distantPast)
-    private var lastPrecise = Date.distantPast   // when the caret itself (not a fallback) was last seen
+    private var lastPrecise = Date.distantPast
     private var observer: AXObserver?
     private var observedPID: pid_t = 0
     private var releaseTask: DispatchWorkItem?
@@ -61,6 +67,38 @@ final class CaretGlowPanel {
         }
     }
 
+    // MARK: - lifecycle
+
+    private func show() {
+        guard !shown else { return }
+        shown = true
+        placed = false
+        lastNote = ""
+        lastPrecise = .distantPast
+        releaseTask?.cancel()
+        DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
+        observe(NSWorkspace.shared.frontmostApplication?.processIdentifier)
+        poll()
+        timer?.invalidate()
+        // the observer reports selection changes as they happen; this only catches scrolling and
+        // window moves, which have no text notification
+        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.poll() }
+    }
+
+    private func hide() {
+        guard shown else { return }
+        shown = false
+        timer?.invalidate()
+        timer = nil
+        stopMotion()
+        unobserve()
+        fade(to: 0, duration: 0.3, thenOrderOut: true)
+        // give browsers their normal behaviour back once dictation has been quiet for a while
+        let task = DispatchWorkItem { CaretLocator.releaseWebContent() }
+        releaseTask = task
+        DispatchQueue.main.asyncAfter(deadline: .now() + 600, execute: task)
+    }
+
     // MARK: - AX notifications
 
     /// Subscribe to selection, value and focus changes in the front app; they arrive on the main run loop.
@@ -90,34 +128,7 @@ final class CaretGlowPanel {
         observedPID = 0
     }
 
-    private func show() {
-        guard !shown else { return }
-        shown = true
-        placed = false
-        lastNote = ""
-        releaseTask?.cancel()
-        lastPrecise = .distantPast
-        DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
-        observe(NSWorkspace.shared.frontmostApplication?.processIdentifier)
-        poll()
-        timer?.invalidate()
-        // the observer below reports selection changes as they happen; this only catches scrolling and
-        // window moves, which have no text notification
-        timer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.poll() }
-    }
-
-    private func hide() {
-        guard shown else { return }
-        shown = false
-        timer?.invalidate()
-        timer = nil
-        unobserve()
-        fade(to: 0, duration: 0.3, thenOrderOut: true)
-        // give browsers their normal behaviour back once dictation has been quiet for a while
-        let task = DispatchWorkItem { CaretLocator.releaseWebContent() }
-        releaseTask = task
-        DispatchQueue.main.asyncAfter(deadline: .now() + 600, execute: task)
-    }
+    // MARK: - locating
 
     private func poll() {
         if let fixedRect {
@@ -155,25 +166,76 @@ final class CaretGlowPanel {
         }
     }
 
+    // MARK: - motion
+
     private func place(_ hit: CaretLocator.Hit) {
         geometry.caretHeight = min(max(hit.rect.height, 14), 44)
         let s = CaretGlowPanel.size
         let origin = NSPoint(x: hit.rect.midX - s / 2, y: hit.rect.midY - s / 2)
         if !placed {
             placed = true
+            current = origin
+            target = origin
             panel.setFrameOrigin(origin)
             panel.orderFrontRegardless()
             fade(to: 1, duration: 0.2, thenOrderOut: false)
-        } else if abs(panel.frame.origin.x - origin.x) > 0.5 || abs(panel.frame.origin.y - origin.y) > 0.5 {
-            // NSWindow's animator proxy silently drops setFrameOrigin; move the window directly
-            panel.setFrame(NSRect(origin: origin, size: panel.frame.size), display: true)
-            if panel.alphaValue < 1 { fade(to: 1, duration: 0.2, thenOrderOut: false) }
+            return
         }
+        let dist = hypot(target.x - origin.x, target.y - origin.y)
+        guard dist > 0.5 else { return }
+        target = origin
+        if dist > 260 {
+            // focus moved somewhere else entirely: reappear there rather than sliding across the screen
+            stopMotion()
+            current = origin
+            panel.alphaValue = 0
+            panel.setFrameOrigin(origin)
+            fade(to: 1, duration: 0.25, thenOrderOut: false)
+            return
+        }
+        if panel.alphaValue < 1 { fade(to: 1, duration: 0.2, thenOrderOut: false) }
+        startMotion()
+    }
+
+    private func startMotion() {
+        guard motion == nil else { return }
+        lastTick = Date()
+        let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
+        RunLoop.main.add(t, forMode: .common)
+        motion = t
+    }
+
+    private func stopMotion() {
+        motion?.invalidate()
+        motion = nil
+        geometry.speed = 0
+    }
+
+    /// Ease toward the target: a first-order glide with an 85 ms time constant, so a word-sized hop
+    /// takes about a quarter of a second and never overshoots.
+    private func tick() {
+        let now = Date()
+        let dt = max(0.001, now.timeIntervalSince(lastTick))
+        lastTick = now
+        let dx = target.x - current.x, dy = target.y - current.y
+        let dist = hypot(dx, dy)
+        if dist < 0.25 {
+            current = target
+            panel.setFrameOrigin(current)
+            stopMotion()
+            return
+        }
+        let k = 1 - exp(-dt / 0.085)
+        current.x += dx * k
+        current.y += dy * k
+        panel.setFrameOrigin(current)
+        geometry.speed = dist * k / dt
     }
 
     /// No caret this tick (focus moved to something without text, or the app does not tell): go quiet.
     private func lost() {
         placed = false
+        stopMotion()
         if panel.alphaValue > 0 { fade(to: 0, duration: 0.25, thenOrderOut: false) }
     }
 
@@ -187,13 +249,14 @@ final class CaretGlowPanel {
     }
 }
 
-/// The effect: a slight glow around the caret that breathes and swells a little with the input
-/// level, and under it the logo, a small black square (네모).
+/// The effect: a soft glow around the caret in two layers that breathes, swells a little with the
+/// input level and stretches slightly while gliding, and under it the logo, a small black square
+/// (네모), which brightens for a moment each time a chunk of text lands.
 struct CaretGlowView: View {
     @ObservedObject var model: DictationModel
     @ObservedObject var geometry: CaretGeometry
     @State private var breathe = false
-    @State private var bump = false
+    @State private var flash = false
 
     private var accent: Color {
         switch model.state {
@@ -208,29 +271,37 @@ struct CaretGlowView: View {
         let writing = model.state == .listening
         let level = CGFloat(model.level)
         let h = geometry.caretHeight
-        let radius: CGFloat = 13 + (breathe ? 3 : 0) + 7 * level
+        let stretch = min(geometry.speed / 900, 0.6)
+        let r: CGFloat = 12 + (breathe ? 2.5 : 0) + 6 * level
         ZStack {
+            // wide, faint halo
             Ellipse()
-                .fill(RadialGradient(colors: [accent.opacity(writing ? 0.38 : 0.22), accent.opacity(0.10), .clear],
-                                     center: .center, startRadius: 0, endRadius: radius))
-                .frame(width: radius * 2, height: max(radius * 2, h + 10))
+                .fill(RadialGradient(colors: [accent.opacity(writing ? 0.20 : 0.12), .clear], center: .center, startRadius: 0, endRadius: r * 1.9))
+                .frame(width: r * 3.8 * (1 + stretch), height: max(r * 3.8, h + 18))
+                .blur(radius: 3)
+            // tight core
+            Ellipse()
+                .fill(RadialGradient(colors: [accent.opacity(writing ? 0.5 : 0.28), accent.opacity(0.12), .clear], center: .center, startRadius: 0, endRadius: r))
+                .frame(width: r * 2 * (1 + stretch), height: max(r * 2, h + 6))
                 .blur(radius: 1.5)
-                .animation(.easeOut(duration: 0.12), value: level)
-
+                .brightness(flash ? 0.25 : 0)
+            // the logo
             RoundedRectangle(cornerRadius: 1.8, style: .continuous)
                 .fill(.black)
                 .frame(width: 7, height: 7)
                 .overlay(RoundedRectangle(cornerRadius: 1.8, style: .continuous).strokeBorder(.white.opacity(0.5), lineWidth: 0.5))
-                .shadow(color: accent.opacity(0.7), radius: 2.5)
-                .scaleEffect(bump ? 1.3 : 1)
+                .shadow(color: accent.opacity(flash ? 1 : 0.6), radius: flash ? 5 : 2.5)
+                .scaleEffect(flash ? 1.15 : 1)
                 .opacity(model.state == .loading ? (breathe ? 0.45 : 0.9) : 1)
                 .offset(y: h / 2 + 9)
         }
+        .animation(.easeOut(duration: 0.12), value: level)
+        .animation(.easeOut(duration: 0.1), value: geometry.speed)
         .frame(width: CaretGlowPanel.size, height: CaretGlowPanel.size)
-        .onAppear { withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: true)) { breathe = true } }
+        .onAppear { withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { breathe = true } }
         .onChange(of: model.insertPulse) { _, _ in
-            withAnimation(.easeOut(duration: 0.08)) { bump = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { withAnimation(.spring(response: 0.32, dampingFraction: 0.55)) { bump = false } }
+            withAnimation(.easeOut(duration: 0.06)) { flash = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) { withAnimation(.easeOut(duration: 0.45)) { flash = false } }
         }
     }
 }

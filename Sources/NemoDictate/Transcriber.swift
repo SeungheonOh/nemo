@@ -8,7 +8,7 @@ import NemoAudio
 /// queue; callbacks are delivered on the main queue.
 final class Transcriber {
     var onReady: ((String, String) -> Void)?   // GPU name, microphone name
-    var onText: ((String) -> Void)?       // newly decoded text (append)
+    var onText: ((String, Int) -> Void)?  // newly decoded text (append) and the stream generation it belongs to
     var onLevel: ((Float) -> Void)?       // 0...1 input level
     var onError: ((String) -> Void)?
 
@@ -17,6 +17,8 @@ final class Transcriber {
     private let engine = AVAudioEngine()
     private var running = false
     private(set) var loadMs: Double = 0
+    private var generation = 0          // queue-confined: bumped by every reset
+    private var nextGeneration = 0      // main-confined: handed out by reconfigure()
 
     /// `deviceUID` nil means the system default input.
     func start(language: String, latencyMs: Int, deviceUID: String?) {
@@ -98,14 +100,49 @@ final class Transcriber {
     }
 
     private func feed(_ samples: [Float], final: Bool) {
-        guard let h = handle else { return }
+        if let s = decode(samples, final: final), !s.isEmpty {
+            let gen = generation
+            DispatchQueue.main.async { self.onText?(s, gen) }
+        }
+    }
+
+    /// Queue-confined: run the recogniser and return whatever text it produced.
+    private func decode(_ samples: [Float], final: Bool) -> String? {
+        guard let h = handle else { return nil }
         var err = [CChar](repeating: 0, count: 512)
         let text = samples.withUnsafeBufferPointer { nemoasr_feed(h, $0.baseAddress, samples.count, final ? 1 : 0, &err, err.count) }
         if err[0] != 0 { report(String(cString: err)) }
-        if let text {
-            let s = String(cString: text)
-            nemoasr_free(text)
-            if !s.isEmpty { DispatchQueue.main.async { self.onText?(s) } }
+        guard let text else { return nil }
+        defer { nemoasr_free(text) }
+        return String(cString: text)
+    }
+
+    /// Start a fresh stream with another language prompt and chunk latency, keeping the microphone
+    /// and the loaded model. The audio still buffered is flushed first and its text handed to
+    /// `completion` (it belongs to the old stream). Returns the new stream's generation: text tagged
+    /// with a lower one was decoded before the switch. Call on the main queue.
+    @discardableResult
+    func reconfigure(language: String, latencyMs: Int, completion: ((String) -> Void)? = nil) -> Int {
+        nextGeneration += 1
+        let gen = nextGeneration
+        queue.async {
+            let tail = self.decode([], final: true) ?? ""
+            if let h = self.handle {
+                var err = [CChar](repeating: 0, count: 512)
+                if nemoasr_reset(h, language, Int32(latencyMs), &err, err.count) != 0 { self.report("Could not restart the stream: \(String(cString: err))") }
+            }
+            self.generation = gen
+            if let completion { DispatchQueue.main.async { completion(tail) } }
+        }
+        return gen
+    }
+
+    /// Compile the kernels for another latency now, so a later `reconfigure` to it is instant.
+    func prepare(latencyMs: Int) {
+        queue.async {
+            guard let h = self.handle else { return }
+            var err = [CChar](repeating: 0, count: 512)
+            if nemoasr_prepare_latency(h, Int32(latencyMs), &err, err.count) != 0 { self.report(String(cString: err)) }
         }
     }
 
