@@ -42,7 +42,13 @@ public enum CaretLocator {
         } else {
             why += ", no selected range (err \(lastError.rawValue))"
         }
-        _ = markerBounds(el); why += ", marker err \(lastError.rawValue)"
+        if let sel = raw(el, "AXSelectedTextMarkerRange") {
+            let end = param(el, "AXEndTextMarkerForTextMarkerRange", sel); why += ", end marker \(end == nil ? "err \(lastError.rawValue)" : "ok")"
+            if let end { _ = param(el, "AXPreviousTextMarkerForTextMarker", end); why += ", prev marker err \(lastError.rawValue)" }
+            _ = markerBounds(el); why += ", marker bounds err \(lastError.rawValue)"
+        } else {
+            why += ", no marker range (err \(lastError.rawValue))"
+        }
         if let sz = size(el, kAXSizeAttribute) { why += ", size \(Int(sz.width))x\(Int(sz.height))" }
         return (nil, why)
     }
@@ -76,24 +82,54 @@ public enum CaretLocator {
     /// character after it, then the one before it, is measured; WebKit/Chromium text markers are the
     /// fallback for editors that do not answer for plain ranges.
     private static func caretBounds(_ el: AXUIElement) -> (CGRect, String)? {
-        if let r = range(el, kAXSelectedTextRangeAttribute) {
-            if r.length > 0, let b = bounds(el, r) {
-                return (CGRect(x: b.maxX, y: b.minY, width: 2, height: b.height), "selection end")   // typing replaces the selection
+        if let r = range(el, kAXSelectedTextRangeAttribute), let hit = rangeCaret(el, r) { return hit }
+        if let hit = markerCaret(el) { return hit }
+        return nil
+    }
+
+    /// Plain-range path (Cocoa text views, atomic text fields, Chromium <input>/<textarea>).
+    private static func rangeCaret(_ el: AXUIElement, _ r: CFRange) -> (CGRect, String)? {
+        if r.length > 0 {
+            guard let b = bounds(el, r) else { return nil }
+            return (CGRect(x: b.maxX, y: b.minY, width: 2, height: b.height), "selection end")   // typing replaces the selection
+        }
+        // the caret has no bounds of its own: use the right edge of the character before it, unless that
+        // character is a line break (then the caret sits at the start of the next line, left of the char after)
+        let before = CFRange(location: r.location - 1, length: 1)
+        let beforeIsBreak = r.location > 0 && (stringFor(el, before)?.contains(where: { $0.isNewline }) ?? false)
+        if r.location > 0, !beforeIsBreak, let b = bounds(el, before) {
+            return (CGRect(x: b.maxX, y: b.minY, width: 2, height: b.height), "char before caret")
+        }
+        if let b = bounds(el, CFRange(location: r.location, length: 1)) {
+            return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "char after caret")
+        }
+        if let b = bounds(el, r), b.width < 4 {   // some editors answer for the empty range itself
+            return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "caret range")
+        }
+        return nil
+    }
+
+    /// Text-marker path (WebKit, Chromium and Electron rich-text editors). The bounds of a collapsed
+    /// marker range are not the caret there, so walk one character from the selection's end marker.
+    private static func markerCaret(_ el: AXUIElement) -> (CGRect, String)? {
+        guard let sel = raw(el, "AXSelectedTextMarkerRange") else { return nil }
+        if let end = param(el, "AXEndTextMarkerForTextMarkerRange", sel) {
+            var beforeIsBreak = false
+            if let prev = param(el, "AXPreviousTextMarkerForTextMarker", end),
+               let range = param(el, "AXTextMarkerRangeForUnorderedTextMarkers", [prev, end] as CFArray) {
+                beforeIsBreak = (param(el, "AXStringForTextMarkerRange", range) as? String)?.contains(where: { $0.isNewline }) ?? false
+                if !beforeIsBreak, let b = paramRect(el, "AXBoundsForTextMarkerRange", range), b.height > 0, b.width < 200 {
+                    return (CGRect(x: b.maxX, y: b.minY, width: 2, height: b.height), "marker before caret")
+                }
             }
-            if r.length == 0 {
-                if let b = bounds(el, r), b.width < 4 {   // some editors answer for the empty range itself
-                    return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "caret range")
-                }
-                if let b = bounds(el, CFRange(location: r.location, length: 1)) {
-                    return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "char after caret")
-                }
-                if r.location > 0, let b = bounds(el, CFRange(location: r.location - 1, length: 1)) {
-                    return (CGRect(x: b.maxX, y: b.minY, width: 2, height: b.height), "char before caret")
-                }
+            if let next = param(el, "AXNextTextMarkerForTextMarker", end),
+               let range = param(el, "AXTextMarkerRangeForUnorderedTextMarkers", [end, next] as CFArray),
+               let b = paramRect(el, "AXBoundsForTextMarkerRange", range), b.height > 0, b.width < 200 {
+                return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "marker after caret")
             }
         }
-        if let b = markerBounds(el) {
-            return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "text marker range")
+        if let b = paramRect(el, "AXBoundsForTextMarkerRange", sel), b.height > 0, b.width < 4 {
+            return (CGRect(x: b.minX, y: b.minY, width: 2, height: b.height), "marker range")
         }
         return nil
     }
@@ -108,13 +144,25 @@ public enum CaretLocator {
     }
 
     private static func markerBounds(_ el: AXUIElement) -> CGRect? {
-        var mref: CFTypeRef?
-        lastError = AXUIElementCopyAttributeValue(el, "AXSelectedTextMarkerRange" as CFString, &mref)
-        guard lastError == .success, let marker = mref else { return nil }
+        guard let sel = raw(el, "AXSelectedTextMarkerRange") else { return nil }
+        return paramRect(el, "AXBoundsForTextMarkerRange", sel)
+    }
+
+    private static func stringFor(_ el: AXUIElement, _ range: CFRange) -> String? {
+        var r = range
+        guard let p = AXValueCreate(.cfRange, &r) else { return nil }
+        return param(el, kAXStringForRangeParameterizedAttribute, p) as? String
+    }
+
+    private static func param(_ el: AXUIElement, _ attr: String, _ parameter: CFTypeRef) -> CFTypeRef? {
         var ref: CFTypeRef?
-        lastError = AXUIElementCopyParameterizedAttributeValue(el, "AXBoundsForTextMarkerRange" as CFString, marker, &ref)
-        guard lastError == .success, let v = ref, let rect = rect(v), rect.height > 0 else { return nil }
-        return rect
+        lastError = AXUIElementCopyParameterizedAttributeValue(el, attr as CFString, parameter, &ref)
+        return lastError == .success ? ref : nil
+    }
+
+    private static func paramRect(_ el: AXUIElement, _ attr: String, _ parameter: CFTypeRef) -> CGRect? {
+        guard let v = param(el, attr, parameter), let r = rect(v), r.height > 0 else { return nil }
+        return r
     }
 
     // MARK: - AX plumbing

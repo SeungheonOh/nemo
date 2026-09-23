@@ -22,6 +22,7 @@ final class CaretGlowPanel {
     private let queue = DispatchQueue(label: "dev.nemo.caret-locator", qos: .userInteractive)
     private let fixedRect: CGRect?   // demo mode: no tracking, a fixed spot on screen
     private var lastNote = ""
+    private var lastLogged = (rect: CGRect.zero, at: Date.distantPast)
 
     init(model: DictationModel) {
         let s = CaretGlowPanel.size
@@ -57,7 +58,7 @@ final class CaretGlowPanel {
         DebugLog.write("caret tracking on · trusted \(AXIsProcessTrusted()) · front app \(NSWorkspace.shared.frontmostApplication?.localizedName ?? "-")")
         poll()
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.poll() }
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 15, repeats: true) { [weak self] _ in self?.poll() }
     }
 
     private func hide() {
@@ -83,8 +84,10 @@ final class CaretGlowPanel {
                 guard let self else { return }
                 self.inFlight = false
                 guard self.shown else { return }
-                if note != self.lastNote {
+                let moved = hit.map { abs($0.rect.minX - self.lastLogged.rect.minX) > 2 || abs($0.rect.minY - self.lastLogged.rect.minY) > 2 } ?? false
+                if note != self.lastNote || (moved && Date().timeIntervalSince(self.lastLogged.at) > 0.4) {
                     self.lastNote = note
+                    self.lastLogged = (hit?.rect ?? .zero, Date())
                     DebugLog.write(hit.map { "caret \(note) at \(Int($0.rect.minX)),\(Int($0.rect.minY)) h\(Int($0.rect.height))" } ?? "caret \(note)")
                 }
                 if let hit { self.place(hit) } else { self.lost() }
