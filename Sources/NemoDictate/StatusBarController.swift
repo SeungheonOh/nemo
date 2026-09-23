@@ -32,7 +32,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
 
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
-        let toggle = NSMenuItem(title: "Start Listening", action: #selector(toggle(_:)), keyEquivalent: " ")
+        let toggle = NSMenuItem(title: "Start Dictating", action: #selector(toggle(_:)), keyEquivalent: " ")
         toggle.keyEquivalentModifierMask = [.option]
         toggle.target = self
         toggle.tag = 1
@@ -69,18 +69,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         mic.submenu = NSMenu()
         mic.tag = 3
         menu.addItem(mic)
-
-        let outMenu = NSMenu()
-        for (mode, title) in [(OutputMode.clipboard, "Copy to clipboard"), (OutputMode.type, "Type into the focused text field")] {
-            let mi = NSMenuItem(title: title, action: #selector(pickOutput(_:)), keyEquivalent: "")
-            mi.representedObject = mode.rawValue
-            mi.target = self
-            outMenu.addItem(mi)
-        }
-        let out = NSMenuItem(title: "Output", action: nil, keyEquivalent: "")
-        out.submenu = outMenu
-        out.tag = 4
-        menu.addItem(out)
 
         let wakeMenu = NSMenu()
         let enable = NSMenuItem(title: "Wake-word mode (always listening)", action: #selector(toggleWake(_:)), keyEquivalent: "")
@@ -134,7 +122,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        // the status line lives here too, since typing mode shows no pill
+        // the status line lives here: the app has no window of its own
         if menu.item(withTag: 9) == nil {
             let status = NSMenuItem(title: "", action: nil, keyEquivalent: "")
             status.tag = 9
@@ -146,21 +134,18 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         if let mic = menu.item(withTag: 3)?.submenu { rebuildMicrophoneMenu(mic) }
         if let toggle = menu.item(withTag: 1) {
             switch model.state {
-            case .listening: toggle.title = "Stop Transcribing"
-            case .standby: toggle.title = "Start Transcribing Now"
-            default: toggle.title = "Start Listening"
+            case .listening: toggle.title = "Stop Dictating"
+            case .standby: toggle.title = "Dictate Now (skip the wake word)"
+            default: toggle.title = "Start Dictating"
             }
             toggle.isEnabled = !(model.state == .loading || model.state == .finishing)
         }
         menu.item(withTag: 2)?.isEnabled = !model.lastTranscript.isEmpty
-        for item in menu.items where item.tag != 3 && item.tag != 4 && item.tag != 5 {
+        for item in menu.items where item.tag != 3 && item.tag != 5 {
             for mi in item.submenu?.items ?? [] {
                 if let code = mi.representedObject as? String { mi.state = code == model.language ? .on : .off }
                 if let ms = mi.representedObject as? Int { mi.state = ms == model.latencyMs ? .on : .off }
             }
-        }
-        for mi in menu.item(withTag: 4)?.submenu?.items ?? [] {
-            mi.state = (mi.representedObject as? String) == model.outputMode.rawValue ? .on : .off
         }
         if let wake = menu.item(withTag: 5)?.submenu {
             wake.item(withTag: 41)?.state = model.wakeMode ? .on : .off
@@ -174,7 +159,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     @objc private func pickLanguage(_ sender: NSMenuItem) { if let c = sender.representedObject as? String { model.language = c } }
     @objc private func pickLatency(_ sender: NSMenuItem) { if let ms = sender.representedObject as? Int { model.latencyMs = ms } }
     @objc private func pickMic(_ sender: NSMenuItem) { model.micUID = sender.representedObject as? String }
-    @objc private func pickOutput(_ sender: NSMenuItem) { if let raw = sender.representedObject as? String, let m = OutputMode(rawValue: raw) { model.setOutputMode(m) } }
     @objc private func pickSilence(_ sender: NSMenuItem) { if let s = sender.representedObject as? Double { model.silenceStop = s } }
     @objc private func toggleWake(_ sender: NSMenuItem) { model.setWakeMode(!model.wakeMode) }
 

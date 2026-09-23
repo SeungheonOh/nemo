@@ -3,9 +3,9 @@ import Carbon
 import Combine
 import NemoCaret
 
-/// Menu-bar-only app: Option+Space (or the menu) starts listening; the model loads on demand
-/// (about 300 ms), a floating indicator shows the live transcript, and stopping copies the text
-/// to the clipboard and releases the model.
+/// Menu-bar-only app. Option+Space (or the menu) starts dictating into whatever has keyboard focus;
+/// in wake-word mode the microphone stays on and a spoken phrase starts a segment. The only UI is the
+/// menu-bar item and a glow on the caret of the field being written to.
 @main
 enum NemoDictateMain {
     static func main() {
@@ -20,21 +20,17 @@ enum NemoDictateMain {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = DictationModel()
     private var statusBar: StatusBarController?
-    private var panel: IndicatorPanel?
     private var caret: CaretGlowPanel?
     private var hotKey: HotKey?
     private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let panel = IndicatorPanel(model: model)
-        self.panel = panel
         statusBar = StatusBarController(model: model)
         let caret = CaretGlowPanel(model: model)
         self.caret = caret
-        model.$pillVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in panel.setVisible(visible) }.store(in: &cancellables)
         model.$caretEffectVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in caret.setVisible(visible) }.store(in: &cancellables)
         model.$insertPulse.dropFirst().receive(on: DispatchQueue.main).sink { _ in caret.nudge() }.store(in: &cancellables)
-        if ProcessInfo.processInfo.environment["NEMO_DEMO"] != nil { model.demoStream(); return }
+        if ProcessInfo.processInfo.environment["NEMO_DEMO"] == "caret" { model.demoCaret(); return }
         if model.wakeMode { model.start() }
         hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)) { [weak self] in self?.model.toggle() }
     }
