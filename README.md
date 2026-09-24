@@ -1,6 +1,6 @@
-# NemoDictate
+# Nemo
 
-A native macOS menu-bar app for local speech recognition, built on [nemoasr-c](../nemoasr-c): NVIDIA Nemotron 3.5 ASR Streaming 0.6B implemented from scratch in C + Metal. Swift for the app, the C runtime linked in as a static library. Nothing leaves the machine.
+A native macOS menu-bar app for local speech recognition, built on [nemo-c](https://github.com/SeungheonOh/nemo-c): NVIDIA Nemotron 3.5 ASR Streaming 0.6B implemented from scratch in C + Metal. Swift for the app, the C runtime linked in as a static library. Nothing leaves the machine.
 
 What you say is typed straight into whatever text field has keyboard focus, in any app. There is no window: the only feedback is a slight glow on that field's insertion point, with a small black square under it (네모, Nemo, is Korean for square), and the menu-bar icon.
 
@@ -10,22 +10,37 @@ What you say is typed straight into whatever text field has keyboard focus, in a
 ## Build and run
 
 ```bash
-./Scripts/bundle.sh      # builds ../nemoasr-c as libnemoasr.a, then the app, then build/NemoDictate.app
-open build/NemoDictate.app
+git clone git@github.com:SeungheonOh/nemo-c.git ../nemoasr-c
+./Scripts/bundle.sh      # builds ../nemoasr-c as libnemoasr.a, then build/Nemo.app
+open build/Nemo.app
 ```
 
-The first start asks for microphone access. A development build reads the model from the Hugging Face cache (`~/.cache/huggingface/hub/models--mlx-community--nemotron-3.5-asr-streaming-0.6b`; running the Python project in `../nemoasr` once downloads it). A release build carries the model inside the app and needs nothing else.
+The first start asks for microphone access. A development build reads the model from the Hugging Face cache (`~/.cache/huggingface/hub/models--mlx-community--nemotron-3.5-asr-streaming-0.6b`). A release build carries the model inside the app and needs no download. On first launch it extracts the exact BF16 weights into `~/Library/Application Support/Nemo/Models` in the background; this takes about 20 seconds and needs about 1.2 GB of free space. Later launches reuse the extracted copy.
 
 ## Releasing
 
 ```bash
-Scripts/release.sh 0.1.0             # build/NemoDictate.app with the model inside, signed; dist/NemoDictate-0.1.0.{dmg,zip,sha256}
-Scripts/release.sh 0.1.0 --publish   # the same, then a GitHub release v0.1.0 with the artefacts (needs a git remote and gh)
+Scripts/fetch-model.sh build/model-source
+MODEL_DIR=build/model-source Scripts/release.sh 0.1.0
+MODEL_DIR=build/model-source Scripts/release.sh 0.1.0 --publish
 ```
 
-The version defaults to the git tag. `config.json` and `model.safetensors` (about 1.2 GB) are copied into `Contents/Resources/model`, so the DMG is about 1 GB; the app prefers that copy over the Hugging Face cache. Signing (`Scripts/sign.sh`) picks a Developer ID Application certificate if there is one, with the hardened runtime, the microphone entitlement and a timestamp, so the result can be notarised: set `NOTARY_PROFILE` to a `notarytool` keychain profile and the script submits, waits and staples. With only an Apple Development certificate the app is signed for this Mac; other Macs will ask to open it via right-click → Open the first time. `CODESIGN_ID` and `MODEL_DIR` override the defaults. The icon is rendered by `Scripts/make_icon.swift` (the black square on its glow) into `Resources/AppIcon.icns`.
+The version defaults to the current git tag. `Scripts/model-source.sh` pins the model revision and SHA-256 hashes. The release script verifies the BF16 model, compresses it as XZ inside `Contents/Resources/model`, and bundles its license and required notice. The 0.1.0 DMG is 905 MB versus 1,027 MB before compression. The release app verifies the extracted model's hash and installs it atomically before use, preferring it over the Hugging Face cache. Signing (`Scripts/sign.sh`) uses a Developer ID Application certificate when available, with hardened runtime, microphone entitlement and timestamp. Set `NOTARY_PROFILE` or `NOTARY_KEY_FILE`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID` to notarize and staple the app and DMG. `--publish` refuses to run without notarization credentials. An Apple Development signature only works without Gatekeeper warnings on this Mac; public releases need Developer ID signing and notarization. `CODESIGN_ID` and `MODEL_DIR` override the defaults. The icon is rendered by `Scripts/make_icon.swift` into `Resources/AppIcon.icns`.
 
-Typing into other apps needs the **Accessibility** permission (System Settings → Privacy & Security → Accessibility). The first attempt raises the system prompt; add NemoDictate there. macOS ties that permission to the app's code signature, so `Scripts/bundle.sh` signs with your Apple Development (or Developer ID) certificate when `security find-identity` shows one, which keeps the permission across rebuilds; with only an ad-hoc signature it would have to be re-added after every build. `CODESIGN_ID` overrides the choice. Without the permission the text of a segment goes to the clipboard instead and the menu's status line says why.
+GitHub Actions builds pull requests and `main` pushes. Pushing a `vMAJOR.MINOR.PATCH` tag builds an arm64 release, downloads the pinned model, signs and notarizes the app and DMG, publishes the GitHub release, then updates the `nemo` Homebrew cask. The speech runtime revision is pinned in `Scripts/nemo-c-revision`; update that file when using a newer `nemo-c` commit.
+
+The cask lives in this repository's `Casks` directory, so no separate tap repository, deploy key, or repository variable is needed. Before tagging, add these `SeungheonOh/nemo` secrets: `APPLE_DEVELOPER_ID_P12_BASE64`, `APPLE_DEVELOPER_ID_P12_PASSWORD`, `APPLE_NOTARY_KEY_BASE64`, `APPLE_NOTARY_KEY_ID`, and `APPLE_NOTARY_ISSUER_ID`. The notary key must be an App Store Connect **team** API key; individual keys do not work with `notarytool`. Never commit a certificate or private key.
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+brew tap SeungheonOh/nemo https://github.com/SeungheonOh/nemo.git
+brew install --cask SeungheonOh/nemo/nemo
+```
+
+The explicit tap URL is needed because this repository is named `nemo`, not `homebrew-nemo`. The [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) applies to the redistributed model; the agreement PDF and `NOTICE.txt` are inside the app's model resources.
+
+Typing into other apps needs the **Accessibility** permission (System Settings → Privacy & Security → Accessibility). The first attempt raises the system prompt; add Nemo there. macOS ties that permission to the app's code signature, so `Scripts/bundle.sh` signs with your Apple Development (or Developer ID) certificate when `security find-identity` shows one, which keeps the permission across rebuilds; with only an ad-hoc signature it would have to be re-added after every build. `CODESIGN_ID` overrides the choice. Without the permission the text of a segment goes to the clipboard instead and the menu's status line says why.
 
 The menu-bar menu is short: the status line, Start/Stop Dictating, the Wake-Word Mode switch, Copy Last Transcript, Settings…, Quit. Everything else lives in the Settings window (⌘,): General (push-to-talk shortcut, wake-word mode, the wake word, the silence timeout), Speech (language: auto-detect, English, Korean, Japanese, …; chunk latency 80 / 320 / 560 / 1120 ms; microphone, with the list refreshed on demand), Advanced (Accessibility status with a shortcut to the system pane, where the model was loaded from, the log, version). Everything persists; the microphone is remembered by its device UID, and if it is not connected the app falls back to the system default and says so.
 
@@ -56,14 +71,15 @@ flowchart LR
 | `Sources/NemoCaret/CaretLocator.swift` | insertion-point lookup through the Accessibility API, including waking up browser and Electron accessibility trees |
 | `StatusBarController.swift` | `NSStatusItem`, the short menu, status line |
 | `SettingsWindow.swift` | the Settings window: General / Speech / Advanced forms bound to the model's persisted settings |
+| `ModelStorage.swift` | first-run XZ extraction, checksum verification and atomic installation in Application Support |
 | `HotKey.swift` | system-wide hotkey through `RegisterEventHotKey` (no accessibility permission needed) |
-| `DebugLog.swift` | short lines to `~/Library/Logs/NemoDictate.log` about trust, what standby heard, and caret lookups |
+| `DebugLog.swift` | short lines to `~/Library/Logs/Nemo.log` about trust, what standby heard, and caret lookups |
 | `Sources/NemoAudio/AudioInputDevice.swift` | CoreAudio input device enumeration (name, UID, rate, channels), shared with `nemo-feed --list-mics` |
 | `Sources/NemoAudio/WakeWordDetector.swift` | trigger-phrase matching on streaming words, per-word and run-together edit distance, split-word handling |
 | `Sources/CNemoASR` | module map exposing `../nemoasr-c/src/nemoasr.h` to Swift |
 | `Sources/nemo-feed` | headless checks: feed an audio file through the same bridge, exercise the stream restart, list microphones, run the wake-word matcher |
 | `Scripts/bundle.sh`, `Scripts/sign.sh`, `Resources/Info.plist`, `Resources/NemoDictate.entitlements` | development bundle: assembles and signs the `.app` (`LSUIElement`, microphone usage string, icon) |
-| `Scripts/release.sh`, `Scripts/make_icon.swift` | release: model inside the app, signing, optional notarisation, DMG + zip + checksums, optional GitHub release |
+| `Scripts/fetch-model.sh`, `Scripts/release.sh`, `Scripts/render-cask.sh`, `Scripts/make_icon.swift` | pinned model download, compressed release, signing, notarisation, DMG + zip + checksums, Homebrew cask generation |
 
 ## The caret glow
 
@@ -71,7 +87,7 @@ The glow finds the insertion point through the Accessibility API of the focused 
 
 Browsers and Electron apps keep their web accessibility tree switched off until an assistive client shows up. Electron apps are asked with `AXManualAccessibility`. Chrome and its forks only honour the flag VoiceOver sets, `AXEnhancedUserInterface`, and switch their tree on about two seconds later, so the first dictation in a browser takes that long to show the glow; the flag is cleared after ten idle minutes and on quit because Chrome animates window moves while it is set.
 
-Position changes arrive through an `AXObserver` (selection, value, focus, window moves) plus a slow safety poll; the window eases toward each new position with an 85 ms time constant, reappears in place for far moves, and stays put through the momentary misses editors produce while keystrokes land. `~/Library/Logs/NemoDictate.log` records which strategy answered and the DOM element being tracked, for apps that misbehave.
+Position changes arrive through an `AXObserver` (selection, value, focus, window moves) plus a slow safety poll; the window eases toward each new position with an 85 ms time constant, reappears in place for far moves, and stays put through the momentary misses editors produce while keystrokes land. `~/Library/Logs/Nemo.log` records which strategy answered and the DOM element being tracked, for apps that misbehave.
 
 ## Wake word
 
@@ -89,4 +105,4 @@ The trigger is matched on the ASR output word by word with a small edit distance
 - Audio is captured at the device's native rate and resampled inside the C library (windowed sinc), the same path the CLI uses.
 - Latency 560 ms is the default for dictation: text appears about 0.6 s behind your speech. 80 ms is snappier but less accurate.
 - In wake-word mode the model stays loaded (about 1.5 GB physical footprint, almost all of it the bf16 weights) and the GPU runs one 320 ms encoder chunk three times a second, about 6 ms of work each. Standing by costs about 1.5 to 2 % of one CPU core in the release build (the recogniser itself is about 1 %, the rest is the audio tap and the audio engine); the glow view is torn down while hidden, since an invisible repeat-forever animation would otherwise keep the main thread busy.
-- The app has no custom icon yet; the menu bar uses SF Symbols.
+- The app icon is generated from the square mark; the menu bar uses SF Symbols.

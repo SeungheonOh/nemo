@@ -1,0 +1,32 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    runs-on: macos-15
+    steps:
+      - name: Check out Nemo
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: nemo-gui
+          persist-credentials: false
+      - name: Read speech runtime revision
+        id: runtime
+        run: echo "ref=$(cat nemo-gui/Scripts/nemo-c-revision)" >> "$GITHUB_OUTPUT"
+      - name: Check out speech runtime
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: SeungheonOh/nemo-c
+          ref: ${{ steps.runtime.outputs.ref }}
+          path: nemoasr-c
+          persist-credentials: false
+      - name: Build app
+        working-directory: nemo-gui
+        run: SKIP_SIGN=1 Scripts/bundle.sh
