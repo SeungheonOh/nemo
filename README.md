@@ -21,18 +21,18 @@ The first start asks for microphone access. A development build reads the model 
 
 ```bash
 Scripts/fetch-model.sh build/model-source
-MODEL_DIR=build/model-source Scripts/release.sh 0.1.0
+MODEL_DIR=build/model-source Scripts/release.sh 0.1.1
 ```
 
-These commands make a local test build; the public release is made by the tag-triggered workflow below. The version defaults to the current git tag. `Scripts/model-source.sh` pins the model revision and SHA-256 hashes. The release script verifies the BF16 model, compresses it as XZ inside `Contents/Resources/model`, and bundles its license and required notice. The 0.1.0 DMG is 905 MB versus 1,027 MB before compression. The release app verifies the extracted model's hash and installs it atomically before use, preferring it over the Hugging Face cache. The public workflow uses an ad-hoc code signature and needs no Apple Developer account or CI secrets. `CODESIGN_ID=-` selects the same signature for a local release. `Scripts/sign.sh` still accepts a Developer ID certificate and the release script can optionally notarize with `NOTARY_PROFILE` or `NOTARY_KEY_FILE`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`. Do not use `--publish` alongside the tag workflow. `MODEL_DIR` overrides the default. The icon is rendered by `Scripts/make_icon.swift` into `Resources/AppIcon.icns`.
+These commands make a local test build; the public release is made by the tag-triggered workflow below. The version defaults to the current git tag. `Scripts/model-source.sh` pins the model revision and SHA-256 hashes. The release script verifies the BF16 model, compresses it as XZ inside `Contents/Resources/model`, and bundles its license and required notice. A local test DMG was 905 MB versus 1,027 MB before compression. The release app verifies the extracted model's hash and installs it atomically before use, preferring it over the Hugging Face cache. The public workflow uses an ad-hoc code signature and needs no Apple Developer account or CI secrets. `CODESIGN_ID=-` selects the same signature for a local release. `Scripts/sign.sh` still accepts a Developer ID certificate and the release script can optionally notarize with `NOTARY_PROFILE` or `NOTARY_KEY_FILE`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`. Do not use `--publish` alongside the tag workflow. `MODEL_DIR` overrides the default. The icon is rendered by `Scripts/make_icon.swift` into `Resources/AppIcon.icns`.
 
 GitHub Actions builds pull requests and `main` pushes. Pushing a `vMAJOR.MINOR.PATCH` tag builds an arm64 release, downloads the pinned model, ad-hoc signs the app, publishes the GitHub release, then updates the `nemo` Homebrew cask. The speech runtime revision is pinned in `Scripts/nemo-c-revision`; update that file when using a newer `nemo-c` commit.
 
 The cask lives in this repository's `Casks` directory, so no separate tap repository, deploy key, repository variable, or Apple credential is needed. Unlike a Developer ID/notarized app, this release can trigger a macOS Gatekeeper warning. After attempting to open Nemo, follow [Apple's Open Anyway instructions](https://support.apple.com/102445) in System Settings → Privacy & Security if you trust this release. Homebrew does not disable Gatekeeper. Because ad-hoc signatures change between versions, macOS may require re-granting Accessibility access after an update.
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 After the `Publish Nemo` workflow finishes:
