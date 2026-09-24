@@ -13,10 +13,10 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     func show(model: DictationModel, tab: Int = 0, at origin: NSPoint? = nil) {
         if window == nil {
             let host = NSHostingController(rootView: SettingsView(model: model, tab: SettingsView.Tab(rawValue: tab) ?? .general,
-                                                                  onResize: { [weak self] in self?.fit(animated: true) }))
+                                                                  onResize: { [weak self] in self?.fit(animated: false) }))
             host.sizingOptions = []
             let w = NSWindow(contentViewController: host)
-            w.title = "NemoDictate Settings"
+            w.title = "Nemo Settings"
             w.styleMask = [.titled, .closable, .miniaturizable]
             w.titlebarAppearsTransparent = true
             w.isMovableByWindowBackground = true
@@ -282,7 +282,7 @@ private struct AdvancedPane: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsGroup(title: "Permissions",
-                          footer: "Accessibility access lets NemoDictate type into other apps and find their text cursor. If it says granted but nothing is typed, remove NemoDictate from the list in System Settings and add it again.") {
+                          footer: "Accessibility access lets Nemo type into other apps and find their text cursor. If it says granted but nothing is typed, remove Nemo from the list in System Settings and add it again.") {
                 SettingsRow(label: "Accessibility", divider: false) {
                     HStack(spacing: 10) {
                         HStack(spacing: 6) {
@@ -314,7 +314,7 @@ private struct AdvancedPane: View {
                     Image(nsImage: NSApp.applicationIconImage)
                         .resizable().frame(width: 44, height: 44)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("NemoDictate").font(.system(size: 13, weight: .semibold))
+                        Text("Nemo").font(.system(size: 13, weight: .semibold))
                         Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "-"))")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                         Text("Speech recognition in C and Metal, entirely on this Mac.").font(.system(size: 11)).foregroundStyle(.secondary)
