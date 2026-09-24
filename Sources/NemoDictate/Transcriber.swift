@@ -20,19 +20,16 @@ final class Transcriber {
     private var generation = 0          // queue-confined: bumped by every reset
     private var nextGeneration = 0      // main-confined: handed out by reconfigure()
 
-    /// A model shipped inside the app (Contents/Resources/model) wins over the Hugging Face cache.
-    static func modelDirectory() -> String? {
-        if let bundled = Bundle.main.resourceURL?.appendingPathComponent("model", isDirectory: true),
-           FileManager.default.fileExists(atPath: bundled.appendingPathComponent("model.safetensors").path) {
-            return bundled.path
-        }
+    static func modelDirectory() throws -> String? {
+        if let bundled = try ModelStorage.prepareBundledModel() { return bundled }
         var dir = [CChar](repeating: 0, count: 1200)
         return nemoasr_default_model_dir(&dir, dir.count) == 0 ? String(cString: dir) : nil
     }
 
     static var modelSource: String {
-        guard let dir = modelDirectory() else { return "not found" }
-        return dir.hasPrefix(Bundle.main.bundlePath) ? "bundled with the app" : "Hugging Face cache"
+        if ModelStorage.isBundled { return "bundled with the app" }
+        var dir = [CChar](repeating: 0, count: 1200)
+        return nemoasr_default_model_dir(&dir, dir.count) == 0 ? "Hugging Face cache" : "not found"
     }
 
     /// `deviceUID` nil means the system default input.
@@ -40,7 +37,7 @@ final class Transcriber {
         AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
             guard let self else { return }
             guard granted else {
-                DispatchQueue.main.async { self.onError?("Microphone access denied. Allow NemoDictate in System Settings > Privacy & Security > Microphone.") }
+                DispatchQueue.main.async { self.onError?("Microphone access denied. Allow Nemo in System Settings > Privacy & Security > Microphone.") }
                 return
             }
             self.queue.async { self.open(language: language, latencyMs: latencyMs, deviceUID: deviceUID) }
@@ -68,8 +65,15 @@ final class Transcriber {
         let rate = Int32(format.sampleRate.rounded())
         guard rate > 0 else { report("No audio input device."); return }
         var err = [CChar](repeating: 0, count: 512)
-        guard let dir = Transcriber.modelDirectory() else {
-            report("Model not found: neither inside the app nor in the Hugging Face cache (mlx-community/nemotron-3.5-asr-streaming-0.6b).")
+        let dir: String
+        do {
+            guard let found = try Transcriber.modelDirectory() else {
+                report("Model not found: neither inside the app nor in the Hugging Face cache (mlx-community/nemotron-3.5-asr-streaming-0.6b).")
+                return
+            }
+            dir = found
+        } catch {
+            report("Could not prepare the bundled model: \(error.localizedDescription)")
             return
         }
         DebugLog.write("model from \(dir)")

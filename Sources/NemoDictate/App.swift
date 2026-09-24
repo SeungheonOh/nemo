@@ -30,6 +30,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.caret = caret
         model.$caretEffectVisible.removeDuplicates().receive(on: DispatchQueue.main).sink { visible in caret.setVisible(visible) }.store(in: &cancellables)
         model.$insertPulse.dropFirst().receive(on: DispatchQueue.main).sink { _ in caret.nudge() }.store(in: &cancellables)
+        if ModelStorage.isBundled {
+            model.statusLine = "Preparing bundled model…"
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                do {
+                    _ = try ModelStorage.prepareBundledModel()
+                    DispatchQueue.main.async {
+                        if self?.model.statusLine == "Preparing bundled model…" { self?.model.statusLine = "" }
+                    }
+                } catch {
+                    DebugLog.write("model preparation failed: \(error.localizedDescription)")
+                    DispatchQueue.main.async {
+                        if self?.model.state == .idle { self?.model.statusLine = "Could not prepare the bundled model" }
+                    }
+                }
+            }
+        }
         if ProcessInfo.processInfo.environment["NEMO_DEMO"] == "caret" { model.demoCaret(); return }
         if ProcessInfo.processInfo.environment["NEMO_DEMO_MENU"] != nil {
             // UI work: pop the status menu up at a fixed spot
