@@ -46,8 +46,8 @@ if [ "$NOTARIZE" = "1" ]; then
     *) echo "Developer ID Application certificate required for notarization" >&2; exit 1 ;;
   esac
 fi
-if [ "$PUBLISH" = "1" ] && [ "$NOTARIZE" != "1" ]; then
-  echo "public releases require Developer ID signing and notarization credentials" >&2
+if [ "$PUBLISH" = "1" ] && [ "$NOTARIZE" != "1" ] && [ "${CODESIGN_ID:-}" != "-" ]; then
+  echo "publishing without notarization requires CODESIGN_ID=-, not an Apple Development signature" >&2
   exit 1
 fi
 
@@ -125,5 +125,5 @@ ls -la dist/Nemo-"$VERSION".*
 
 if [ "$PUBLISH" = "1" ]; then
   echo "== publishing v$VERSION"
-  gh release create "v$VERSION" "$DMG" "$ZIP" "dist/Nemo-$VERSION.sha256" --verify-tag --title "Nemo $VERSION" --generate-notes
+  gh release create "v$VERSION" "$DMG" "$ZIP" "dist/Nemo-$VERSION.sha256" --verify-tag --title "Nemo $VERSION" --generate-notes --notes "Nemo is ad-hoc signed and not notarized. On first launch, macOS may block it. If you trust this release, try opening Nemo, then choose Open Anyway in System Settings → Privacy & Security. Accessibility access may need to be re-granted after each update."
 fi

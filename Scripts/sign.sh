@@ -10,7 +10,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ENTITLEMENTS="$HERE/../Resources/NemoDictate.entitlements"
 IDENTITY="${CODESIGN_ID:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Developer ID Application/ { print $2; found=1; exit } /Apple Development/ { if (development == "") development=$2 } END { if (!found) print development }')}"
 if [ -z "$IDENTITY" ] || [ "$IDENTITY" = "-" ]; then
-  codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "warning: ad-hoc codesign failed"
+  codesign --force --sign - --entitlements "$ENTITLEMENTS" --timestamp=none "$APP"
   echo "warning: ad-hoc signature; Accessibility access will have to be re-granted after every rebuild"
   exit 0
 fi
