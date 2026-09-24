@@ -1,5 +1,5 @@
 #!/bin/sh
-# Development build: the C runtime as a static library, the app in release mode, build/NemoDictate.app.
+# Development build: the C runtime as a static library, the app in release mode, build/Nemo.app.
 # The model is read from the Hugging Face cache; Scripts/release.sh puts it inside the app.
 #   VERSION=1.2   sets CFBundleShortVersionString (default: whatever Info.plist says)
 #   SKIP_SIGN=1   leave the bundle unsigned (release.sh signs after adding the model)
@@ -7,7 +7,7 @@ set -eu
 cd "$(dirname "$0")/.."
 make -C ../nemoasr-c lib
 swift build -c release --product NemoDictate
-APP="build/NemoDictate.app"
+APP="build/Nemo.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/NemoDictate "$APP/Contents/MacOS/NemoDictate"

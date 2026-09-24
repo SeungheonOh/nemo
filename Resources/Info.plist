@@ -6,8 +6,8 @@
     <key>CFBundleExecutable</key><string>NemoDictate</string>
     <key>CFBundleIdentifier</key><string>dev.nemo.dictate</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
-    <key>CFBundleName</key><string>NemoDictate</string>
-    <key>CFBundleDisplayName</key><string>NemoDictate</string>
+    <key>CFBundleName</key><string>Nemo</string>
+    <key>CFBundleDisplayName</key><string>Nemo</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>NSHumanReadableCopyright</key><string>Speech recognition runs on this Mac. Model: NVIDIA Nemotron 3.5 ASR Streaming 0.6B.</string>
     <key>CFBundlePackageType</key><string>APPL</string>
@@ -16,6 +16,6 @@
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
-    <key>NSMicrophoneUsageDescription</key><string>NemoDictate listens to the microphone to transcribe your speech on this Mac. Audio never leaves the device.</string>
+    <key>NSMicrophoneUsageDescription</key><string>Nemo listens to the microphone to transcribe your speech on this Mac. Audio never leaves the device.</string>
 </dict>
 </plist>

@@ -179,7 +179,7 @@ final class DictationModel: ObservableObject {
 
     private func beginTranscribing(initial: String) {
         if targetIsSelf, demo == nil {
-            DebugLog.write("segment refused · NemoDictate itself is in front")
+            DebugLog.write("segment refused · Nemo itself is in front")
             statusLine = "Click into another app first"
             return
         }
@@ -287,7 +287,7 @@ final class DictationModel: ObservableObject {
         DebugLog.write("session · trusted \(TextInserter.isTrusted) · target \(TextInserter.frontmostAppName)")
         guard !TextInserter.isTrusted else { return }
         TextInserter.requestTrust()
-        statusLine = "Accessibility access is off for NemoDictate · Privacy & Security → Accessibility"
+        statusLine = "Accessibility access is off for Nemo · Privacy & Security → Accessibility"
     }
 
     // MARK: - Demo (NEMO_DEMO=caret: drives the glow without a microphone, for UI work)

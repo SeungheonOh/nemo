@@ -1,9 +1,9 @@
 import Foundation
 
-/// Appends short lines to ~/Library/Logs/NemoDictate.log so problems in other apps (where the caret
+/// Appends short lines to ~/Library/Logs/Nemo.log so problems in other apps (where the caret
 /// lookup happens) can be read afterwards. Truncated when it grows past a megabyte.
 enum DebugLog {
-    static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/NemoDictate.log")
+    static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Nemo.log")
     private static let queue = DispatchQueue(label: "dev.nemo.log", qos: .utility)
     private static let stamp: DateFormatter = { let f = DateFormatter(); f.dateFormat = "HH:mm:ss.SSS"; return f }()
 

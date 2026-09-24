@@ -11,7 +11,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
     init(model: DictationModel) {
         self.model = model
         super.init()
-        item.button?.image = NSImage(systemSymbolName: "mic", accessibilityDescription: "NemoDictate")
+        item.button?.image = NSImage(systemSymbolName: "mic", accessibilityDescription: "Nemo")
         item.menu = buildMenu()
         item.menu?.delegate = self
         model.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refresh() }.store(in: &cancellables)
@@ -24,7 +24,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         let busy = model.state == .loading || model.state == .finishing
         let failed = model.state == .failed
         let name = listening ? "mic.fill" : standby ? "ear" : failed ? "exclamationmark.triangle" : (busy ? "mic.badge.xmark" : "mic")
-        let image = NSImage(systemSymbolName: name, accessibilityDescription: "NemoDictate")
+        let image = NSImage(systemSymbolName: name, accessibilityDescription: "Nemo")
         image?.isTemplate = !listening && !failed
         item.button?.image = image
         item.button?.contentTintColor = listening ? .systemRed : standby ? .systemTeal : failed ? .systemOrange : nil
@@ -54,7 +54,7 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         settings.image = symbol("gearshape")
         menu.addItem(settings)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit NemoDictate", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Nemo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quit)
         return menu
     }
