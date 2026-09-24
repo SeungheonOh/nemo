@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   package:
-    runs-on: macos-15
+    runs-on: macos-26
     outputs:
       version: ${{ steps.version.outputs.version }}
       dmg_sha256: ${{ steps.artifact.outputs.dmg_sha256 || steps.existing.outputs.dmg_sha256 }}

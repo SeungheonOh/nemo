@@ -114,7 +114,14 @@ ln -s /Applications "$STAGE/Applications"
 DMG="dist/Nemo-$VERSION.dmg"
 ZIP="dist/Nemo-$VERSION.zip"
 rm -f "$DMG" "$ZIP"
-hdiutil create -volname "Nemo" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+attempt=1
+while ! hdiutil create -volname "Nemo" -srcfolder "$STAGE" -nospotlight -format UDZO "$DMG"; do
+  [ "$attempt" -lt 3 ] || { echo "could not create DMG after $attempt attempts" >&2; exit 1; }
+  echo "DMG creation failed; retrying ($attempt/3)" >&2
+  rm -f "$DMG"
+  attempt=$((attempt + 1))
+  sleep 10
+done
 if [ "$NOTARIZE" = "1" ]; then
   notarize "$DMG"
   xcrun stapler staple "$DMG"
