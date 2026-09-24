@@ -22,10 +22,9 @@ The first start asks for microphone access. A development build reads the model 
 ```bash
 Scripts/fetch-model.sh build/model-source
 MODEL_DIR=build/model-source Scripts/release.sh 0.1.0
-MODEL_DIR=build/model-source Scripts/release.sh 0.1.0 --publish
 ```
 
-The version defaults to the current git tag. `Scripts/model-source.sh` pins the model revision and SHA-256 hashes. The release script verifies the BF16 model, compresses it as XZ inside `Contents/Resources/model`, and bundles its license and required notice. The 0.1.0 DMG is 905 MB versus 1,027 MB before compression. The release app verifies the extracted model's hash and installs it atomically before use, preferring it over the Hugging Face cache. Signing (`Scripts/sign.sh`) uses a Developer ID Application certificate when available, with hardened runtime, microphone entitlement and timestamp. Set `NOTARY_PROFILE` or `NOTARY_KEY_FILE`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID` to notarize and staple the app and DMG. `--publish` refuses to run without notarization credentials. An Apple Development signature only works without Gatekeeper warnings on this Mac; public releases need Developer ID signing and notarization. `CODESIGN_ID` and `MODEL_DIR` override the defaults. The icon is rendered by `Scripts/make_icon.swift` into `Resources/AppIcon.icns`.
+These commands make a local test build; the public release is made by the tag-triggered workflow below. The version defaults to the current git tag. `Scripts/model-source.sh` pins the model revision and SHA-256 hashes. The release script verifies the BF16 model, compresses it as XZ inside `Contents/Resources/model`, and bundles its license and required notice. The 0.1.0 DMG is 905 MB versus 1,027 MB before compression. The release app verifies the extracted model's hash and installs it atomically before use, preferring it over the Hugging Face cache. Signing (`Scripts/sign.sh`) uses a Developer ID Application certificate when available, with hardened runtime, microphone entitlement and timestamp. Set `NOTARY_PROFILE` or `NOTARY_KEY_FILE`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID` to notarize and staple the app and DMG. `--publish` refuses to run without notarization credentials and should not be used alongside the tag workflow. An Apple Development signature only works without Gatekeeper warnings on this Mac; public releases need Developer ID signing and notarization. `CODESIGN_ID` and `MODEL_DIR` override the defaults. The icon is rendered by `Scripts/make_icon.swift` into `Resources/AppIcon.icns`.
 
 GitHub Actions builds pull requests and `main` pushes. Pushing a `vMAJOR.MINOR.PATCH` tag builds an arm64 release, downloads the pinned model, signs and notarizes the app and DMG, publishes the GitHub release, then updates the `nemo` Homebrew cask. The speech runtime revision is pinned in `Scripts/nemo-c-revision`; update that file when using a newer `nemo-c` commit.
 
@@ -34,6 +33,11 @@ The cask lives in this repository's `Casks` directory, so no separate tap reposi
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
+```
+
+After the `Publish Nemo` workflow finishes:
+
+```bash
 brew tap SeungheonOh/nemo https://github.com/SeungheonOh/nemo.git
 brew install --cask SeungheonOh/nemo/nemo
 ```
