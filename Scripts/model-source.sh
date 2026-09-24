@@ -1,0 +1,8 @@
+MODEL_REPOSITORY=mlx-community/nemotron-3.5-asr-streaming-0.6b
+MODEL_REVISION=e550040c0478027ed679b2b6b0d055502c103663
+MODEL_SHA256=1b78e4551371b1438daba0e8c9e1673bb18606994c1bcc493d85c5454d428ee5
+MODEL_BYTES=1276058836
+CONFIG_SHA256=97fe51f0970514e6cac928bcaebac4dbb1dba554f980642542ffac451a0dca56
+MODEL_README_SHA256=974db899669025c38a337cfa782fb4ea68dbb822e4529110a9a47c61dca64e5d
+MODEL_LICENSE_URL=https://www.nvidia.com/content/dam/en-zz/Solutions/license-agreements/enterprise-software/nvidia-open-model-license-agreements-24-10-2025.pdf
+MODEL_LICENSE_SHA256=4d2fb590aa9b30c47f2058bff17291df7fa2aa0c1bd775a20703da9bb267cfab

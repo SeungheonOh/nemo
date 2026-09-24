@@ -1,0 +1,5 @@
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+
+Model: mlx-community/nemotron-3.5-asr-streaming-0.6b
+Source: https://huggingface.co/mlx-community/nemotron-3.5-asr-streaming-0.6b
+The NVIDIA Open Model License Agreement accompanies the model as LICENSE.pdf.
