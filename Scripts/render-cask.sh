@@ -37,6 +37,11 @@ cat <<'EOF'
 
   uninstall quit: "dev.nemo.dictate"
 
+  caveats do
+    puts "Nemo is not notarized. If macOS blocks its first launch, use System Settings → Privacy & Security → Open Anyway after verifying you trust this release."
+    unsigned_accessibility
+  end
+
   zap trash: [
     "~/Library/Application Support/Nemo",
     "~/Library/Logs/Nemo.log",
