@@ -283,6 +283,13 @@ private struct SpeechPane: View {
                 }
             }
 
+            SettingsGroup(title: "Spoken corrections",
+                          footer: "Say “correction” (or “정정”) and the right words: “send it to John correction to Mike” becomes “send it to Mike”. When the segment ends, Apple's on-device model finds the word being replaced and the typed text is fixed in place. Without Apple Intelligence only the word “correction” is removed.") {
+                SettingsRow(label: "Apply spoken corrections", detail: SelfCorrection.unavailableReason, divider: false) {
+                    Toggle("", isOn: $model.selfCorrect).toggleStyle(.switch).labelsHidden()
+                }
+            }
+
             SettingsGroup(title: "Microphone",
                           footer: "Remembered by device; if it is not connected the system default is used. Changes apply to the next session or segment.") {
                 SettingsRow(label: "Input", divider: false) {

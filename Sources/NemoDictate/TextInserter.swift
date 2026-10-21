@@ -18,6 +18,22 @@ enum TextInserter {
         NSWorkspace.shared.frontmostApplication?.localizedName ?? "the focused app"
     }
 
+    static var frontmostPID: pid_t? { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+
+    /// Presses Delete `count` times: removes that many characters before the caret.
+    static func deleteBackward(_ count: Int) {
+        guard count > 0, let source = CGEventSource(stateID: .combinedSessionState) else { return }
+        for _ in 0..<count {
+            guard let down = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Delete), keyDown: true),
+                  let up = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_Delete), keyDown: false) else { return }
+            down.flags = []
+            up.flags = []
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+            usleep(2000)
+        }
+    }
+
     static func type(_ text: String) {
         guard !text.isEmpty, let source = CGEventSource(stateID: .combinedSessionState) else { return }
         let units = Array(text.utf16)

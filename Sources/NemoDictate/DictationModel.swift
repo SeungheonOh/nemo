@@ -33,6 +33,7 @@ final class DictationModel: ObservableObject {
     @Published var wakeMode = UserDefaults.standard.bool(forKey: "wakeMode") { didSet { UserDefaults.standard.set(wakeMode, forKey: "wakeMode") } }
     @Published var silenceStop = UserDefaults.standard.object(forKey: "silenceStop") as? Double ?? 2.5 { didSet { UserDefaults.standard.set(silenceStop, forKey: "silenceStop") } }
     @Published var micButton = UserDefaults.standard.bool(forKey: "micButton") { didSet { UserDefaults.standard.set(micButton, forKey: "micButton") } }
+    @Published var selfCorrect = UserDefaults.standard.bool(forKey: "selfCorrect") { didSet { UserDefaults.standard.set(selfCorrect, forKey: "selfCorrect") } }
 
     private var transcriber: Transcriber?
     private var detector: WakeWordDetector
@@ -42,6 +43,7 @@ final class DictationModel: ObservableObject {
     private var standbyRefreshTask: DispatchWorkItem?
     private var acceptGeneration = 0    // text from older recogniser streams (before a switch) is ignored
     private var typedCount = 0          // characters of `transcript` already typed into the focused app
+    private var targetPID: pid_t?       // the app being typed into, so a cleanup never edits another app
 
     static let languages: [(String, String)] = [
         ("auto", "Detect language"), ("en-US", "English"), ("ko-KR", "Korean"), ("ja-JP", "Japanese"),
@@ -117,6 +119,8 @@ final class DictationModel: ObservableObject {
                 self.armStandbyRefresh()
             } else {
                 self.statusLine = "Transcribing into \(TextInserter.frontmostAppName) · \(mic) · \(self.latencyMs) ms · \(Int(t.loadMs)) ms load · \(gpu)"
+                self.targetPID = TextInserter.frontmostPID
+                if self.selfCorrect { SelfCorrection.prewarm() }
                 self.set(.listening)
             }
         }
@@ -197,6 +201,8 @@ final class DictationModel: ObservableObject {
         typedCount = 0
         let stop = wakeMode ? " · stops after \(String(format: "%.1f", silenceStop)) s of silence" : ""
         statusLine = "Transcribing into \(TextInserter.frontmostAppName)\(stop)"
+        targetPID = TextInserter.frontmostPID
+        if selfCorrect { SelfCorrection.prewarm() }
         set(.listening)
         warnIfUntrusted()
         deliverLiveText()
@@ -221,24 +227,28 @@ final class DictationModel: ObservableObject {
                     self.transcript += tail
                     self.deliverLiveText()
                 }
-                self.deliverFinal()
-                self.set(.done)
-                DebugLog.write("segment end · \(self.transcript.count) characters")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
-                    guard let self, self.state == .done else { return }
-                    self.transcript = ""
-                    self.statusLine = "Standing by for “\(self.wakeWord)”"
-                    self.set(.standby)
-                    self.armStandbyRefresh()
+                self.applySelfCorrection {
+                    self.deliverFinal()
+                    self.set(.done)
+                    DebugLog.write("segment end · \(self.transcript.count) characters")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                        guard let self, self.state == .done else { return }
+                        self.transcript = ""
+                        self.statusLine = "Standing by for “\(self.wakeWord)”"
+                        self.set(.standby)
+                        self.armStandbyRefresh()
+                    }
                 }
             }
         } else {
             t.stop { [weak self] in
                 guard let self else { return }
                 self.transcriber = nil
-                self.deliverFinal()
-                self.set(.done)
-                self.settle(after: 1.0)
+                self.applySelfCorrection {
+                    self.deliverFinal()
+                    self.set(.done)
+                    self.settle(after: 1.0)
+                }
             }
         }
     }
@@ -255,6 +265,42 @@ final class DictationModel: ObservableObject {
     }
 
     // MARK: - Output
+
+    /// Segment end: apply spoken corrections ("… to John correction to Mike"), then replace what was
+    /// typed with the result: backspace over the part that changed and type the new ending.
+    private func applySelfCorrection(then next: @escaping () -> Void) {
+        let original = transcript
+        let body = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard selfCorrect, demo == nil, SelfCorrection.containsKeyword(body) else { next(); return }
+        statusLine = "Applying correction…"
+        SelfCorrection.clean(body) { [weak self] cleaned in
+            guard let self else { return }
+            defer { next() }
+            guard let cleaned else { return }
+            let lead = original.prefix(while: { $0.isWhitespace })
+            let trail = original.reversed().prefix(while: { $0.isWhitespace }).reversed()
+            let replacement = String(lead) + cleaned.trimmingCharacters(in: .whitespacesAndNewlines) + String(trail)
+            guard replacement != original else {
+                DebugLog.write("correction · no change")
+                return
+            }
+            DebugLog.write("correction · \(body.debugDescription) → \(cleaned.debugDescription)")
+            if TextInserter.isTrusted, self.typedCount > 0, TextInserter.frontmostPID != self.targetPID {
+                // only edit the field the words went into; if focus moved, keep what was typed there
+                DebugLog.write("correction · focus moved, typed text left as is")
+            } else if TextInserter.isTrusted, self.typedCount > 0 {
+                let typed = Array(original.prefix(self.typedCount))
+                let new = Array(replacement)
+                var common = 0
+                while common < typed.count, common < new.count, typed[common] == new[common] { common += 1 }
+                TextInserter.deleteBackward(typed.count - common)
+                TextInserter.type(String(new[common...]))
+                self.insertPulse += 1
+            }
+            self.transcript = replacement
+            self.typedCount = replacement.count
+        }
+    }
 
     private func deliverLiveText() {
         guard TextInserter.isTrusted else { return }
