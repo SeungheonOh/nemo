@@ -19,6 +19,7 @@ enum NemoDictateMain {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let model = DictationModel()
+    let micButton = MicButton.shared
     private var statusBar: StatusBarController?
     private var caret: CaretGlowPanel?
     private var hotKey: HotKey?
@@ -63,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if model.wakeMode { model.start() }
         hotKey = HotKey(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)) { [weak self] in self?.model.toggle() }
+        micButton.onPress = { [weak self] in self?.model.toggle() }
+        model.$micButton.removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self] on in self?.micButton.setEnabled(on) }.store(in: &cancellables)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

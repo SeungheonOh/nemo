@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import IOKit.hid
 import NemoAudio
 import SwiftUI
 
@@ -219,6 +220,16 @@ private struct GeneralPane: View {
                     .pickerStyle(.segmented).labelsHidden().frame(width: 190)
                 }
             }
+
+            SettingsGroup(title: "DJI Mic Mini",
+                          footer: "The button on the transmitter works like the shortcut. Nemo takes over the receiver's button so it no longer changes the volume; the microphone itself is not affected. Needs Input Monitoring access.") {
+                SettingsRow(label: "Use the transmitter button") {
+                    Toggle("", isOn: $model.micButton).toggleStyle(.switch).labelsHidden()
+                }
+                SettingsRow(label: "Status", divider: false) {
+                    MicButtonStatusView(button: MicButton.shared)
+                }
+            }
         }
         .onAppear { wakeDraft = model.wakeWord }
     }
@@ -226,6 +237,27 @@ private struct GeneralPane: View {
     private func commitWakeWord() {
         let phrase = wakeDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         if !phrase.isEmpty, phrase != model.wakeWord { model.wakeWord = phrase }
+    }
+}
+
+private struct MicButtonStatusView: View {
+    @ObservedObject var button: MicButton
+
+    var body: some View {
+        let (color, text): (Color, String) = {
+            switch button.status {
+            case .off: return (.secondary, "Off")
+            case .needsPermission: return (.orange, "Waiting for Input Monitoring access")
+            case .waitingForDevice: return (.secondary, "Receiver not connected")
+            case .ready(blocking: true): return (.green, "Ready")
+            case .ready(blocking: false): return (.orange, "Ready · volume not blocked")
+            case .failed(let message): return (.red, message)
+            }
+        }()
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text(text).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -277,13 +309,14 @@ private struct SpeechPane: View {
 private struct AdvancedPane: View {
     @ObservedObject var model: DictationModel
     @State private var trusted = AXIsProcessTrusted()
+    @State private var listening = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
     private let ticker = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             SettingsGroup(title: "Permissions",
-                          footer: "Accessibility access lets Nemo type into other apps and find their text cursor. If it says granted but nothing is typed, remove Nemo from the list in System Settings and add it again.") {
-                SettingsRow(label: "Accessibility", divider: false) {
+                          footer: "Accessibility access lets Nemo type into other apps and find their text cursor. Input Monitoring lets it read the DJI Mic Mini button. If Accessibility says granted but nothing is typed, remove Nemo from the list in System Settings and add it again.") {
+                SettingsRow(label: "Accessibility") {
                     HStack(spacing: 10) {
                         HStack(spacing: 6) {
                             Circle().fill(trusted ? Color.green : Color.orange).frame(width: 8, height: 8)
@@ -291,6 +324,17 @@ private struct AdvancedPane: View {
                         }
                         Button("Open System Settings…") {
                             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
+                        }
+                    }
+                }
+                SettingsRow(label: "Input Monitoring", detail: "Only for the DJI Mic Mini button", divider: false) {
+                    HStack(spacing: 10) {
+                        HStack(spacing: 6) {
+                            Circle().fill(listening ? Color.green : Color.orange).frame(width: 8, height: 8)
+                            Text(listening ? "Granted" : "Not granted").foregroundStyle(.secondary)
+                        }
+                        Button("Open System Settings…") {
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent") { NSWorkspace.shared.open(url) }
                         }
                     }
                 }
@@ -324,7 +368,12 @@ private struct AdvancedPane: View {
                 .padding(14)
             }
         }
-        .onReceive(ticker) { _ in trusted = AXIsProcessTrusted() }
-        .onAppear { trusted = AXIsProcessTrusted() }
+        .onReceive(ticker) { _ in refresh() }
+        .onAppear(perform: refresh)
+    }
+
+    private func refresh() {
+        trusted = AXIsProcessTrusted()
+        listening = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent) == kIOHIDAccessTypeGranted
     }
 }

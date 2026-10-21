@@ -32,6 +32,7 @@ final class DictationModel: ObservableObject {
     @Published var wakeWord = UserDefaults.standard.string(forKey: "wakeWord") ?? "hey nemo" { didSet { UserDefaults.standard.set(wakeWord, forKey: "wakeWord"); detector = WakeWordDetector(phrase: wakeWord) } }
     @Published var wakeMode = UserDefaults.standard.bool(forKey: "wakeMode") { didSet { UserDefaults.standard.set(wakeMode, forKey: "wakeMode") } }
     @Published var silenceStop = UserDefaults.standard.object(forKey: "silenceStop") as? Double ?? 2.5 { didSet { UserDefaults.standard.set(silenceStop, forKey: "silenceStop") } }
+    @Published var micButton = UserDefaults.standard.bool(forKey: "micButton") { didSet { UserDefaults.standard.set(micButton, forKey: "micButton") } }
 
     private var transcriber: Transcriber?
     private var detector: WakeWordDetector
