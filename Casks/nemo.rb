@@ -1,6 +1,6 @@
 cask "nemo" do
-  version "0.1.1"
-  sha256 "0a4a664f980921ea0eafbfec0ef059985a6da2b06a9a77e25492f08e3421cba4"
+  version "0.2.0"
+  sha256 "c94c01e2b2b54afb5fa782c57441c842fdf969bfd399b1c500d17b6e3f396bf1"
 
   url "https://github.com/SeungheonOh/nemo/releases/download/v#{version}/Nemo-#{version}.dmg"
   name "Nemo"
