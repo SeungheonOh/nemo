@@ -6,6 +6,8 @@ What you say is typed straight into whatever text field has keyboard focus, in a
 
 - **Push to talk.** Press **Option + Space** (or the menu item) with a text field focused, speak, press it again. The model loads on demand each time, about 300 ms including GPU warm-up, and is released afterwards, so the app costs nothing while idle.
 - **Wake-word mode** (Wake word menu) keeps the microphone and the model running all the time. The menu-bar icon turns into a teal ear; say the trigger phrase ("hey nemo" by default, set your own) and a segment starts, anything said in the same breath after the phrase is kept. It stops by itself after 1.5 / 2.5 / 4 s without new words and goes back to waiting for the phrase. Option + Space starts a segment without the phrase, or ends one early.
+- **DJI Mic Mini button** (Settings → General, off by default). The button on the transmitter does what Option + Space does. Nemo opens the receiver's button interface exclusively, so the press no longer changes the system volume; the microphone itself is not affected. Needs the Input Monitoring permission.
+- **Spoken corrections** (Settings → Speech, off by default). Say "correction" (or "정정") and the right words: "send it to John correction to Mike by Friday" becomes "send it to Mike by Friday", fixed in place when the segment ends. The edit runs from the replaced word through "correction". If the correction opens with a word just said ("at nine correction at ten"), that word marks the start; otherwise Apple's on-device model (macOS 26, Apple Intelligence) picks the replaced word from the last few words, about 0.4 s. Without the model only the word "correction" is removed. Text without the keyword is never sent to the model.
 
 ## Build and run
 
@@ -21,7 +23,7 @@ The first start asks for microphone access. A development build reads the model 
 
 ```bash
 Scripts/fetch-model.sh build/model-source
-MODEL_DIR=build/model-source Scripts/release.sh 0.1.1
+MODEL_DIR=build/model-source Scripts/release.sh 0.2.0
 ```
 
 These commands make a local test build; the public release is made by the tag-triggered workflow below. The version defaults to the current git tag. `Scripts/model-source.sh` pins the model revision and SHA-256 hashes. The release script verifies the BF16 model, compresses it as XZ inside `Contents/Resources/model`, and bundles its license and required notice. A local test DMG was 905 MB versus 1,027 MB before compression. The release app verifies the extracted model's hash and installs it atomically before use, preferring it over the Hugging Face cache. The public workflow uses an ad-hoc code signature and needs no Apple Developer account or CI secrets. `CODESIGN_ID=-` selects the same signature for a local release. `Scripts/sign.sh` still accepts a Developer ID certificate and the release script can optionally notarize with `NOTARY_PROFILE` or `NOTARY_KEY_FILE`, `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID`. Do not use `--publish` alongside the tag workflow. `MODEL_DIR` overrides the default. The icon is rendered by `Scripts/make_icon.swift` into `Resources/AppIcon.icns`.
@@ -31,8 +33,8 @@ GitHub Actions builds pull requests and `main` pushes. Pushing a `vMAJOR.MINOR.P
 The cask lives in this repository's `Casks` directory, so no separate tap repository, deploy key, repository variable, or Apple credential is needed. Unlike a Developer ID/notarized app, this release can trigger a macOS Gatekeeper warning. After attempting to open Nemo, follow [Apple's Open Anyway instructions](https://support.apple.com/102445) in System Settings → Privacy & Security if you trust this release. Homebrew does not disable Gatekeeper. Because ad-hoc signatures change between versions, macOS may require re-granting Accessibility access after an update.
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 After the `Publish Nemo` workflow finishes:
@@ -44,9 +46,9 @@ brew install --cask SeungheonOh/nemo/nemo
 
 The explicit tap URL is needed because this repository is named `nemo`, not `homebrew-nemo`. The [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) applies to the redistributed model; the agreement PDF and `NOTICE.txt` are inside the app's model resources.
 
-Typing into other apps needs the **Accessibility** permission (System Settings → Privacy & Security → Accessibility). The first attempt raises the system prompt; add Nemo there. macOS ties that permission to the app's code signature, so `Scripts/bundle.sh` signs with your Apple Development (or Developer ID) certificate when `security find-identity` shows one, which keeps the permission across rebuilds; with only an ad-hoc signature it would have to be re-added after every build. `CODESIGN_ID` overrides the choice. Without the permission the text of a segment goes to the clipboard instead and the menu's status line says why.
+Typing into other apps needs the **Accessibility** permission (System Settings → Privacy & Security → Accessibility). The first attempt raises the system prompt; add Nemo there. macOS ties that permission to the app's code signature, so `Scripts/bundle.sh` signs with your Apple Development (or Developer ID) certificate when `security find-identity` shows one, which keeps the permission across rebuilds; with only an ad-hoc signature it would have to be re-added after every build. `CODESIGN_ID` overrides the choice. Without the permission the text of a segment goes to the clipboard instead and the menu's status line says why. The DJI Mic Mini button also needs **Input Monitoring** (same pane); macOS may only apply it after Nemo is reopened.
 
-The menu-bar menu is short: the status line, Start/Stop Dictating, the Wake-Word Mode switch, Copy Last Transcript, Settings…, Quit. Everything else lives in the Settings window (⌘,): General (push-to-talk shortcut, wake-word mode, the wake word, the silence timeout), Speech (language: auto-detect, English, Korean, Japanese, …; chunk latency 80 / 320 / 560 / 1120 ms; microphone, with the list refreshed on demand), Advanced (Accessibility status with a shortcut to the system pane, where the model was loaded from, the log, version). Everything persists; the microphone is remembered by its device UID, and if it is not connected the app falls back to the system default and says so.
+The menu-bar menu is short: the status line, Start/Stop Dictating, the Wake-Word Mode switch, Copy Last Transcript, Settings…, Quit. Everything else lives in the Settings window (⌘,): General (push-to-talk shortcut, wake-word mode, the wake word, the silence timeout, the DJI Mic Mini button with its connection status), Speech (language: auto-detect, English, Korean, Japanese, …; chunk latency 80 / 320 / 560 / 1120 ms; spoken corrections; microphone, with the list refreshed on demand), Advanced (Accessibility and Input Monitoring status with shortcuts to the system panes, where the model was loaded from, the log, version). Everything persists; the microphone is remembered by its device UID, and if it is not connected the app falls back to the system default and says so.
 
 ## How it fits together
 
@@ -54,12 +56,15 @@ The menu-bar menu is short: the status line, Start/Stop Dictating, the Wake-Word
 flowchart LR
     hk[Option+Space<br/>Carbon hotkey] --> model[DictationModel<br/>state machine]
     menu[Menu bar item] --> model
+    dji[DJI Mic Mini button<br/>IOHIDManager, seized] --> model
     model -->|start / restart stream| tr[Transcriber]
     tr -->|AVAudioEngine tap<br/>hardware rate| lib["libnemoasr.a<br/>nemoasr_open / feed / reset<br/>(resample → mel → encoder → RNNT)"]
     lib -->|text deltas| model
     tr -->|RMS level| model
     model -->|standby| wake[WakeWordDetector<br/>fuzzy phrase match]
     wake -->|phrase heard| model
+    model -->|segment end, keyword heard| fix[SelfCorrection<br/>rule or on-device model]
+    fix -->|backspace + retype| typer
     model -->|type| typer[TextInserter<br/>CGEvent Unicode keystrokes]
     model -->|show / nudge| glow[CaretGlowPanel]
     glow -->|where is the caret| ax[CaretLocator<br/>Accessibility API]
@@ -70,12 +75,14 @@ flowchart LR
 | `Sources/NemoDictate/App.swift` | `NSApplication` bootstrap, accessory (menu-bar only) app, wires hotkey, menu and caret glow |
 | `DictationModel.swift` | idle → loading → (standby ⇄) listening → finishing → done state, transcript, stream switching, silence timeout, persisted settings |
 | `Transcriber.swift` | microphone permission, `AVAudioEngine` input tap, mono mix and level, calls into the C library on a serial queue, stream restarts tagged with a generation |
-| `TextInserter.swift` | Accessibility check and prompt, typing text into the focused app through `CGEvent` keyboard events |
+| `TextInserter.swift` | Accessibility check and prompt, typing text into the focused app through `CGEvent` keyboard events, backspacing for corrections |
 | `CaretGlowPanel.swift` | click-through panel that follows the insertion point: AX notifications, gliding motion, the glow and the square logo |
 | `Sources/NemoCaret/CaretLocator.swift` | insertion-point lookup through the Accessibility API, including waking up browser and Electron accessibility trees |
 | `StatusBarController.swift` | `NSStatusItem`, the short menu, status line |
 | `SettingsWindow.swift` | the Settings window: General / Speech / Advanced forms bound to the model's persisted settings |
 | `ModelStorage.swift` | first-run XZ extraction, checksum verification and atomic installation in Application Support |
+| `MicButton.swift` | the DJI Mic Mini transmitter button: `IOHIDManager` matched to the receiver, opened exclusively, Input Monitoring check |
+| `SelfCorrection.swift` | spoken corrections: keyword detection, the edit, and the Foundation Models call that picks the replaced word |
 | `HotKey.swift` | system-wide hotkey through `RegisterEventHotKey` (no accessibility permission needed) |
 | `DebugLog.swift` | short lines to `~/Library/Logs/Nemo.log` about trust, what standby heard, and caret lookups |
 | `Sources/NemoAudio/AudioInputDevice.swift` | CoreAudio input device enumeration (name, UID, rate, channels), shared with `nemo-feed --list-mics` |
